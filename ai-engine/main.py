@@ -6,12 +6,27 @@ import math
 from redis_client import push_transaction, record_transaction_time, get_recent_transactions
 from features import extract_features
 from gnn_model import load_or_initialize_model, build_transaction_graph
+import json
 from explainer import generate_explanation
 
 app = FastAPI(title="FraudShield AI Engine", version="1.0.0")
 
 # Load model globally on startup
 model = load_or_initialize_model()
+
+# Setup default threshold, loading dynamically if available
+GNN_THRESHOLD = 0.65
+try:
+    report_path = os.path.join(os.path.dirname(__file__), "training", "results", "evaluation_report.json")
+    if os.path.exists(report_path):
+        with open(report_path, "r") as f:
+            report_data = json.load(f)
+            if "recommended_threshold" in report_data:
+                GNN_THRESHOLD = report_data["recommended_threshold"]
+except Exception as e:
+    pass
+
+print(f"[FraudShield] GNN threshold loaded: {GNN_THRESHOLD}")
 
 class TransactionPayload(BaseModel):
     """Incoming transaction data from the Node.js server."""
@@ -72,8 +87,7 @@ def analyze_transaction_post(txn: TransactionPayload):
     
     print(f"DEBUG [Normalization]: velocity_score_normalized={velocity_score_normalized}, location_risk_score={location_risk_score}")
 
-    # 6. Improved safety override and scoring formula
-    # Amount-based progressive risk adjustment
+    # 6. Amount-based progressive risk
     if txn.amount < 1000:
         amount_risk = 0.0
     elif txn.amount < 10000:
@@ -83,26 +97,29 @@ def analyze_transaction_post(txn: TransactionPayload):
     else:
         amount_risk = 1.0
 
-    # Recalculate final score including amount risk
+    # Production scoring — GNN + heuristics + amount risk
     final_score = (
-        (0.15 * gnn_score) +
-        (0.20 * velocity_score_normalized) +
-        (0.40 * location_risk_score) +
-        (0.25 * amount_risk)
+        (0.40 * gnn_score) +
+        (0.20 * location_risk_score) +
+        (0.25 * amount_risk) +
+        (0.15 * velocity_score_normalized)
     )
     final_score = float(final_score)
 
-    # Hard floor for clearly safe transactions
-    if txn.amount < 5000 and location_risk_score <= 0.3:
-        final_score = min(final_score, 0.35)
-        
-    print(f"DEBUG [Scoring Phase]: final_score={final_score}")
+    # Hard override — obvious fraud signals that GNN may miss due to synthetic training
+    if txn.amount >= 100000 and location_risk_score >= 0.8:
+        final_score = max(final_score, 0.85)
+
+    if txn.amount >= 50000 and location_risk_score >= 0.5:
+        final_score = max(final_score, 0.70)
+
+    print(f"DEBUG [Scoring Phase]: amount_risk={amount_risk}, final_score={final_score}")
 
     # 7. Explainability
     reason = generate_explanation(features_vector, final_score)
 
     # 8. Response — contract unchanged for Node.js compatibility
-    if final_score >= 0.65:
+    if final_score >= GNN_THRESHOLD:
         response_dict = {
             "status": "High Risk",
             "action": "FREEZE",

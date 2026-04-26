@@ -1,0 +1,8 @@
+{
+    "total_count": 15000,
+    "fraud_count": 3000,
+    "legitimate_count": 12000,
+    "mean_amount": 61966.509,
+    "std_amount": 121544.67154177814,
+    "fraud_rate": 0.2
+}

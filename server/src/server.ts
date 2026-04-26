@@ -1,12 +1,16 @@
 import app from "./app.js";
 import { config } from "./config/index.js";
 import prisma from "./services/prisma.service.js";
+import { startRecoveryJobs } from "./jobs/recovery.job.js";
 
 async function bootstrap(): Promise<void> {
     try {
         // Verify database connectivity
         await prisma.$connect();
         console.log("[FraudShield] ✅ Database connected");
+
+        // Fire daily batch engines
+        startRecoveryJobs();
 
         app.listen(config.port, () => {
             console.log(`[FraudShield] 🛡️  Server running on http://localhost:${config.port}`);

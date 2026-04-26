@@ -1,0 +1,8 @@
+{
+    "best_val_loss": 0.00010452622329386133,
+    "test_accuracy": 1.0,
+    "test_precision": 1.0,
+    "test_recall": 1.0,
+    "test_f1": 1.0,
+    "test_auc_roc": 1.0
+}

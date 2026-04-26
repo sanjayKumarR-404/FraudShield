@@ -1,0 +1,10 @@
+{
+    "recommended_threshold": 0.3,
+    "max_f1_score": 1.0,
+    "confusion_matrix": {
+        "TN": 1800,
+        "FP": 0,
+        "FN": 0,
+        "TP": 450
+    }
+}
