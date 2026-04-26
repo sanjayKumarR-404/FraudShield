@@ -1,19 +1,43 @@
 {
-  "name": "server",
+  "name": "fraudshield-server",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "FraudShield real-time fraud defense server",
+  "main": "dist/server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "seed": "tsx prisma/seed.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev"
   },
-  "keywords": [],
+  "keywords": [
+    "fraud-detection",
+    "upi",
+    "fintech"
+  ],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
+    "@prisma/client": "^6.6.0",
     "axios": "^1.15.2",
+    "bcryptjs": "^3.0.2",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^3.0.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.2",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.15.3",
+    "prisma": "^6.6.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   }
 }

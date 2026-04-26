@@ -1,0 +1,51 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  FROZEN
+  FAILED
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  upiVpa    String   @unique @map("upi_vpa")
+  isFlagged Boolean  @default(false) @map("is_flagged")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  sentTransactions     Transaction[] @relation("SenderTransactions")
+  receivedTransactions Transaction[] @relation("ReceiverTransactions")
+
+  @@map("users")
+}
+
+model Transaction {
+  id          String            @id @default(uuid())
+  senderVpa   String            @map("sender_vpa")
+  receiverVpa String            @map("receiver_vpa")
+  amount      Decimal           @db.Decimal(12, 2)
+  rrn         String            @unique @db.VarChar(12)
+  status      TransactionStatus @default(PENDING)
+  isFraud     Boolean           @default(false) @map("is_fraud")
+  location    String
+  riskScore   Float?            @map("risk_score")
+  reason      String?
+  timestamp   DateTime          @default(now())
+
+  sender   User @relation("SenderTransactions", fields: [senderVpa], references: [upiVpa])
+  receiver User @relation("ReceiverTransactions", fields: [receiverVpa], references: [upiVpa])
+
+  @@index([senderVpa])
+  @@index([receiverVpa])
+  @@index([status])
+  @@map("transactions")
+}
