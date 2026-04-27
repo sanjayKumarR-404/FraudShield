@@ -45,6 +45,10 @@ model Transaction {
   receiver User @relation("ReceiverTransactions", fields: [receiverVpa], references: [upiVpa])
   recoveryCases RecoveryCase[]
 
+  whatsappAlertSent  Boolean  @default(false)
+  voiceAlertSent     Boolean  @default(false)
+  alertSentAt        DateTime?
+
   @@index([senderVpa])
   @@index([receiverVpa])
   @@index([status])

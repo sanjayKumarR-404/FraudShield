@@ -3,6 +3,7 @@ import { TransactionStatus } from "@prisma/client";
 import prisma from "./prisma.service.js";
 import { config } from "../config/index.js";
 import type { TransactionBody, AIEngineResponse } from "../types/index.js";
+import { sendFraudAlerts } from "./alert.service.js";
 
 /**
  * Generate a 12-digit Reference Retrieval Number (RRN) for UPI transactions.
@@ -82,6 +83,13 @@ export async function processTransaction(payload: TransactionBody) {
         where: { id: transaction.id },
         data: { status: finalStatus, isFraud, reason, riskScore },
     });
+
+    // Fire alerts in background — do not await, never block the freeze pipeline
+    if (finalStatus === TransactionStatus.FROZEN) {
+        sendFraudAlerts(updatedTransaction).catch(err =>
+            console.error('[FraudShield] Alert dispatch failed:', err)
+        );
+    }
 
     return updatedTransaction;
 }

@@ -15,6 +15,9 @@ interface Transaction {
     riskScore?: string;
     timestamp?: string;
     createdAt?: string;
+    whatsappAlertSent?: boolean;
+    voiceAlertSent?: boolean;
+    alertSentAt?: string;
 }
 
 export default function DashboardPage() {
@@ -267,10 +270,16 @@ export default function DashboardPage() {
                                 <tbody className="divide-y divide-gray-800/50">
                                     {transactions.slice(0, 20).map((tx) => (
                                         <tr key={tx.id} className="hover:bg-white/[0.02] transition duration-150">
-                                            <td className="px-6 py-4">
+                                            <td className="px-6 py-4 flex items-center gap-2">
                                                 <span className={`px-2 py-1 text-[10px] font-bold uppercase tracking-widest rounded shadow-sm border ${getStatusColor(tx.status)}`}>
                                                     {tx.status}
                                                 </span>
+                                                {tx.status === 'FROZEN' && (
+                                                    <span className="inline-flex items-center gap-1">
+                                                        <span title={`WhatsApp Alert: ${tx.whatsappAlertSent ? 'Sent ' + (tx.alertSentAt ? new Date(tx.alertSentAt).toLocaleTimeString() : '') : 'Pending'}`} className={`text-base cursor-help transition-opacity ${tx.whatsappAlertSent ? 'opacity-100 grayscale-0' : 'opacity-30 grayscale'}`}>💬</span>
+                                                        <span title={`Voice Alert: ${tx.voiceAlertSent ? 'Sent ' + (tx.alertSentAt ? new Date(tx.alertSentAt).toLocaleTimeString() : '') : 'Pending'}`} className={`text-base cursor-help transition-opacity ${tx.voiceAlertSent ? 'opacity-100 grayscale-0' : 'opacity-30 grayscale'}`}>📞</span>
+                                                    </span>
+                                                )}
                                             </td>
                                             <td className="px-6 py-4 font-mono font-medium text-gray-100 whitespace-nowrap">₹ {Number(tx.amount).toLocaleString('en-IN')}</td>
                                             <td className="px-6 py-4 hidden sm:table-cell max-w-[200px]">

@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import torch
 import math
+import httpx
+import asyncio
 
 from redis_client import push_transaction, record_transaction_time, get_recent_transactions
 from features import extract_features
@@ -136,3 +138,31 @@ def analyze_transaction_post(txn: TransactionPayload):
         
     print(f"DEBUG [Response generated]: {response_dict}")
     return response_dict
+
+
+class AlertPayload(BaseModel):
+    transactionId: str
+    amount: float
+    senderVpa: str
+    rrn: str
+    riskScore: float
+    reason: str
+
+@app.post("/webhook/freeze-alert")
+async def trigger_freeze_alert(payload: AlertPayload):
+    """
+    Webhook called to trigger Node.js Twilio alerts directly.
+    """
+    try:
+        async with httpx.AsyncClient() as client:
+            # We explicitly target the unified test boundary allowing external loopback if authenticated locally
+            response = await client.post(
+                "http://localhost:5000/api/alerts/test",
+                json={"transactionId": payload.transactionId},
+                headers={"Content-Type": "application/json"}
+            )
+            print(f"[FastAPI] Dispatched alert to Node.js backend: {response.status_code}")
+    except Exception as e:
+        print(f"[FastAPI] Webhook alert dispatch bypass failed: {str(e)}")
+        
+    return {"message": "Webhook alert event dispatched internally"}

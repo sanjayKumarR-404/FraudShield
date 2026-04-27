@@ -4,6 +4,7 @@ import authRoutes from "./routes/auth.routes.js";
 import transactionRoutes from "./routes/transaction.routes.js";
 import { errorHandler } from "./middleware/error.middleware.js";
 import recoveryRoutes from "./routes/recovery.routes.js";
+import alertRoutes from "./routes/alert.routes.js";
 
 const app = express();
 
@@ -20,6 +21,7 @@ app.get("/health", (_req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/transactions", transactionRoutes);
 app.use("/api/recovery", recoveryRoutes);
+app.use("/api/alerts", alertRoutes);
 
 // --- Global Error Handler (must be last) ---
 app.use(errorHandler);

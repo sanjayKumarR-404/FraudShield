@@ -9,6 +9,11 @@ export const config = {
     jwtExpiresIn: "24h",
     aiEngineUrl: process.env.AI_ENGINE_URL || "http://localhost:8000",
     bcryptSaltRounds: 12,
+    twilioAccountSid: process.env.TWILIO_ACCOUNT_SID || '',
+    twilioAuthToken: process.env.TWILIO_AUTH_TOKEN || '',
+    twilioWhatsappFrom: process.env.TWILIO_WHATSAPP_FROM || '',
+    twilioVoiceFrom: process.env.TWILIO_VOICE_FROM || '',
+    alertPhoneNumber: process.env.ALERT_PHONE_NUMBER || '',
 } as const;
 
 // Debug — remove after confirming fix
