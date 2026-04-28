@@ -12,9 +12,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- Health Check ---
-app.get("/health", (_req, res) => {
-    res.json({ status: "operational", service: "FraudShield Server", timestamp: new Date().toISOString() });
+// --- Health Verification Route ---
+app.get('/api/health', (_req, res) => {
+    res.json({ status: 'ok', service: 'FraudShield API', timestamp: new Date().toISOString() });
 });
 
 // --- API Routes ---

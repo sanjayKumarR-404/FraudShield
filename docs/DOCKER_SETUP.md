@@ -34,5 +34,9 @@ docker compose up --build [service]
 ```
 
 ## Common Troubleshooting
+- **Check Individual Service Health:** `docker compose ps`
+- **View Specific Component Logs:** `docker compose logs -f server`
+- **Force Restart Individual Layer:** `docker compose restart server`
+- **Is Server showing "Unhealthy"?:** Check migrations internally via `docker compose logs server` directly
 - **Database migrations failed:** Ensure the database container is fully healthy before the `server` attempts to migrate. This is mostly handled by `depends_on: postgres: service_healthy`.
 - **Port conflicts:** If you run into `bind: address already in use`, make sure you don't have existing Postgres, Redis, Client or Node servers running locally on your machine mapped heavily over identical external ports (e.g 5432, 6379, 5000, 80).

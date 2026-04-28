@@ -38,7 +38,7 @@ export default function DashboardPage() {
     const [recovTx, setRecovTx] = useState<Transaction | null>(null);
     const [recovName, setRecovName] = useState('');
     const [recovEmail, setRecovEmail] = useState('');
-    const [recovNotes, setRecovNotes] = useState('');
+    const [_recovNotes, setRecovNotes] = useState('');
     const [recovLoading, setRecovLoading] = useState(false);
 
     // Stats calculation
@@ -296,7 +296,7 @@ export default function DashboardPage() {
                                             </td>
                                             <td className="px-6 py-4 text-right text-gray-500 text-xs whitespace-nowrap font-mono">
                                                 {tx.createdAt || tx.timestamp
-                                                    ? new Date(tx.createdAt || tx.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                                                    ? new Date((tx.createdAt || tx.timestamp) as string).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
                                                     : 'N/A'
                                                 }
                                             </td>
