@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { getAllRecoveryCases, advanceRecovery } from '../api/client';
+import { getAllRecoveryCases, advanceRecovery, downloadRecoveryPdf } from '../api/client';
 
 export default function RecoveryCasesPage() {
     const [cases, setCases] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [filterStatus, setFilterStatus] = useState('All');
     const [advancingId, setAdvancingId] = useState<string | null>(null);
+    const [downloadingId, setDownloadingId] = useState<string | null>(null);
     const [nowTime, setNowTime] = useState(new Date());
 
     useEffect(() => {
@@ -44,6 +45,17 @@ export default function RecoveryCasesPage() {
         const remainingTicks = new Date(expiresAt).getTime() - new Date().getTime();
         const days = Math.ceil(remainingTicks / (1000 * 60 * 60 * 24));
         return Math.max(0, days);
+    };
+
+    const handleDownloadPdf = async (id: string) => {
+        setDownloadingId(id);
+        try {
+            await downloadRecoveryPdf(id);
+        } catch (err) {
+            alert("Failed to download PDF.");
+        } finally {
+            setDownloadingId(null);
+        }
     };
 
     const filteredCases = cases.filter(c => filterStatus === 'All' || c.status === filterStatus);
@@ -178,14 +190,13 @@ export default function RecoveryCasesPage() {
                                                     </button>
                                                 )}
                                                 {c.pdfPath && (
-                                                    <a
-                                                        href={`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/generated-pdfs/${c.id}.pdf`}
-                                                        target="_blank"
-                                                        rel="noreferrer"
-                                                        className="block w-full text-center text-[10px] font-bold uppercase tracking-widest text-[var(--color-success)] bg-[var(--color-success)]/10 hover:bg-[var(--color-success)]/20 border border-[var(--color-success)]/30 py-2 px-3 rounded shadow-sm transition-all"
+                                                    <button
+                                                        onClick={() => handleDownloadPdf(c.id)}
+                                                        disabled={downloadingId === c.id}
+                                                        className="block w-full text-center text-[10px] font-bold uppercase tracking-widest text-[var(--color-success)] bg-[var(--color-success)]/10 hover:bg-[var(--color-success)]/20 border border-[var(--color-success)]/30 py-2 px-3 rounded shadow-sm transition-all disabled:opacity-50"
                                                     >
-                                                        Download PDF
-                                                    </a>
+                                                        {downloadingId === c.id ? 'DL...' : 'Download PDF'}
+                                                    </button>
                                                 )}
                                             </td>
                                         </tr>

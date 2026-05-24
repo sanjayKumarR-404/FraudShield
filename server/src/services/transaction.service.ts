@@ -4,6 +4,7 @@ import prisma from "./prisma.service.js";
 import { config } from "../config/index.js";
 import type { TransactionBody, AIEngineResponse } from "../types/index.js";
 import { sendFraudAlerts } from "./alert.service.js";
+import { syncUserProfile } from "../jobs/profile.job.js";
 
 /**
  * Generate a 12-digit Reference Retrieval Number (RRN) for UPI transactions.
@@ -43,6 +44,10 @@ export async function processTransaction(payload: TransactionBody) {
     let isFraud = false;
     let reason = "Transaction processed successfully";
     let riskScore = 0;
+    let attributionData: string | null = null;
+
+    // Attempt lookup for anomaly detection mapping
+    const user = await prisma.user.findUnique({ where: { upiVpa: payload.senderVpa } });
 
     try {
         // Step 2: Call the Python AI engine for risk analysis
@@ -55,6 +60,7 @@ export async function processTransaction(payload: TransactionBody) {
                 receiverVpa: payload.receiverVpa,
                 location: payload.location,
                 timestamp: now.toISOString(),
+                userId: user?.id || null
             },
             { timeout: 15000 }
         );
@@ -62,6 +68,10 @@ export async function processTransaction(payload: TransactionBody) {
         const analysis = aiResponse.data;
         riskScore = analysis.riskScore;
         reason = analysis.reason;
+
+        if (analysis.attribution) {
+            attributionData = JSON.stringify(analysis.attribution);
+        }
 
         // Step 3/4: Apply the "Freeze First" logic
         if (analysis.status === "High Risk") {
@@ -81,7 +91,13 @@ export async function processTransaction(payload: TransactionBody) {
     // Step 5: Update transaction with final verdict
     const updatedTransaction = await prisma.transaction.update({
         where: { id: transaction.id },
-        data: { status: finalStatus, isFraud, reason, riskScore },
+        data: {
+            status: finalStatus,
+            isFraud,
+            reason,
+            riskScore,
+            attributionData
+        },
     });
 
     // Fire alerts in background — do not await, never block the freeze pipeline
@@ -89,6 +105,10 @@ export async function processTransaction(payload: TransactionBody) {
         sendFraudAlerts(updatedTransaction).catch(err =>
             console.error('[FraudShield] Alert dispatch failed:', err)
         );
+    }
+
+    if (user) {
+        syncUserProfile(user.id);
     }
 
     return updatedTransaction;
@@ -112,7 +132,6 @@ export async function getTransactionById(id: string) {
         where: { id },
         include: {
             sender: { select: { id: true, email: true, upiVpa: true } },
-            receiver: { select: { id: true, email: true, upiVpa: true } },
         },
     });
 }

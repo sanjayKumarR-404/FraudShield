@@ -73,3 +73,28 @@ export async function getById(req: AuthenticatedRequest, res: Response): Promise
         data: transaction,
     } satisfies ApiResponse);
 }
+
+/**
+ * GET /api/transactions/:id/attribution
+ * Returns SHAP-style attribution logs isolated securely mapping direct breakdown data natively.
+ */
+export async function getAttribution(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const { id } = req.params;
+    const transaction = await getTransactionById(id as string);
+
+    if (!transaction) {
+        res.status(404).json({ success: false, message: "Transaction not found" } satisfies ApiResponse);
+        return;
+    }
+
+    if (!transaction.attributionData) {
+        res.status(404).json({ success: false, message: "Attribution vector unavailable for tracking." } satisfies ApiResponse);
+        return;
+    }
+
+    res.status(200).json({
+        success: true,
+        message: "Attribution vector retrieved",
+        data: JSON.parse(transaction.attributionData),
+    } satisfies ApiResponse);
+}

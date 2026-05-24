@@ -4,6 +4,8 @@ import { NavLink } from 'react-router-dom';
 const GridIcon = () => (<svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>);
 const ChartIcon = () => (<svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>);
 const ShieldIcon = () => (<svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>);
+const UserIcon = () => (<svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>);
+const BatchIcon = () => (<svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>);
 
 export default function Sidebar({ expanded, setExpanded }: { expanded: boolean, setExpanded: React.Dispatch<React.SetStateAction<boolean>> }) {
     return (
@@ -31,6 +33,16 @@ export default function Sidebar({ expanded, setExpanded }: { expanded: boolean, 
                     <ShieldIcon />
                     {expanded && <span className="font-semibold text-sm whitespace-nowrap absolute left-10">Recovery Cases</span>}
                     {!expanded && <div className="absolute left-14 bg-[var(--color-bg-elevated)] text-white text-[10px] uppercase font-bold tracking-widest px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">Recovery Cases</div>}
+                </NavLink>
+                <NavLink to="/batch" className={({ isActive }) => `flex items-center gap-4 px-2.5 py-2.5 rounded-lg transition-colors group relative ${isActive ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-elevated)] hover:text-white'}`}>
+                    <BatchIcon />
+                    {expanded && <span className="font-semibold text-sm whitespace-nowrap absolute left-10">Batch Processing</span>}
+                    {!expanded && <div className="absolute left-14 bg-[var(--color-bg-elevated)] text-white text-[10px] uppercase font-bold tracking-widest px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">Batch Processing</div>}
+                </NavLink>
+                <NavLink to="/profile" className={({ isActive }) => `flex items-center gap-4 px-2.5 py-2.5 rounded-lg transition-colors group relative ${isActive ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-elevated)] hover:text-white'}`}>
+                    <UserIcon />
+                    {expanded && <span className="font-semibold text-sm whitespace-nowrap absolute left-10">My Profile</span>}
+                    {!expanded && <div className="absolute left-14 bg-[var(--color-bg-elevated)] text-white text-[10px] uppercase font-bold tracking-widest px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">My Profile</div>}
                 </NavLink>
             </nav>
 

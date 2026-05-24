@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import { getRecoveryByTransaction, initiateRecovery } from '../api/client';
+import client, { getRecoveryByTransaction, initiateRecovery } from '../api/client';
+import FeatureAttributionChart from './FeatureAttributionChart';
 
 export default function TransactionDetailModal({ tx, onClose }: { tx: any, onClose: () => void }) {
     const [recoveryInfo, setRecoveryInfo] = useState<any>(null);
+    const [behavior, setBehavior] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [initLoading, setInitLoading] = useState(false);
 
@@ -14,6 +16,15 @@ export default function TransactionDetailModal({ tx, onClose }: { tx: any, onClo
                 setRecoveryInfo(data);
             } catch (e) {
                 // If 404 or fails, it means no case exists
+            }
+
+            try {
+                if (tx.sender?.id) {
+                    const profileCheckRes = await client.post(`/api/users/${tx.sender.id}/profile-check`, { transaction: tx });
+                    setBehavior(profileCheckRes.data);
+                }
+            } catch (e) {
+                console.error("Behavior check failed", e);
             } finally {
                 setLoading(false);
             }
@@ -53,7 +64,12 @@ export default function TransactionDetailModal({ tx, onClose }: { tx: any, onClo
 
     return (
         <div className="fixed inset-0 z-[100] flex justify-center items-center p-4 bg-black/80 backdrop-blur-md transition-opacity animate-in fade-in" onClick={onClose}>
-            <div className="bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-2xl w-full max-w-4xl shadow-2xl flex flex-col md:flex-row overflow-hidden animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+            <div className="bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col md:flex-row relative animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+                
+                {/* Sticky Close Button */}
+                <button onClick={onClose} className="absolute top-4 right-4 z-50 p-2 bg-black/60 hover:bg-black/90 rounded-full text-white transition-colors border border-[var(--color-border)] backdrop-blur-md">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
 
                 {/* Left Side: Detail Matrix */}
                 <div className="flex-1 border-r border-[var(--color-border)] flex flex-col">
@@ -119,6 +135,13 @@ export default function TransactionDetailModal({ tx, onClose }: { tx: any, onClo
                             <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">Matrix Check</span>
                             <span className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded bg-[var(--color-text-muted)]/10 text-white">GNN Activated</span>
                         </div>
+                        <div className="mt-4 border-t border-[var(--color-border-subtle)] pt-4">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-[#f59e0b] mb-3">Feature Attribution Analysis</p>
+                            <FeatureAttributionChart
+                                attribution={tx.attributionData ? (typeof tx.attributionData === 'string' ? JSON.parse(tx.attributionData) : tx.attributionData) : null}
+                                finalScore={riskScore}
+                            />
+                        </div>
                     </div>
 
                     <div className="p-5 flex-1 flex flex-col justify-between">
@@ -135,6 +158,23 @@ export default function TransactionDetailModal({ tx, onClose }: { tx: any, onClo
                             </div>
 
                             <div className="mt-4 pt-4 border-t border-[var(--color-border-subtle)]">
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-[#f59e0b] mb-3">Behavioral Anomaly Logs</p>
+                                {behavior ? (
+                                    behavior.isAnomalous ? (
+                                        <div className="flex flex-col gap-2 mb-4">
+                                            {behavior.anomalousFactors.map((factor: string, i: number) => (
+                                                <div key={i} className="text-[8px] font-bold leading-normal uppercase tracking-widest px-2 py-1.5 rounded border border-[#f59e0b]/30 bg-[#f59e0b]/10 text-[#f59e0b]">⚠ {factor}</div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="text-[9px] text-[var(--color-success)] tracking-wide font-bold mb-4 font-mono">✓ Profile bounds aligned.</div>
+                                    )
+                                ) : (
+                                    <div className="text-[9px] text-[var(--color-text-muted)] mb-4 uppercase tracking-widest">Calibrating Vector...</div>
+                                )}
+                            </div>
+
+                            <div className="mt-2 pt-4 border-t border-[var(--color-border-subtle)]">
                                 <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)] mb-3">RBI Legal Dispute</p>
                                 {loading ? (
                                     <div className="h-2 w-full bg-[var(--color-border)] rounded animate-pulse"></div>

@@ -3,9 +3,10 @@ import { BrowserRouter, Routes, Route, Navigate, NavLink } from 'react-router-do
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
-// Assume Analytics & Recovery Cases pages exist. We will define them next.
 import AnalyticsPage from './pages/AnalyticsPage';
 import RecoveryCasesPage from './pages/RecoveryCasesPage';
+import UserProfilePage from './pages/UserProfilePage';
+import BatchUploadPage from './pages/BatchUploadPage';
 import Sidebar from './components/Sidebar';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -36,6 +37,7 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
         <MobileTab to="/dashboard" label="Dashboard" />
         <MobileTab to="/analytics" label="Analytics" />
         <MobileTab to="/recovery" label="Disputes" />
+        <MobileTab to="/batch" label="Batch" />
       </div>
     </div>
   );
@@ -52,6 +54,8 @@ function App() {
         <Route path="/dashboard" element={<ProtectedRoute><DashboardLayout><DashboardPage /></DashboardLayout></ProtectedRoute>} />
         <Route path="/analytics" element={<ProtectedRoute><DashboardLayout><AnalyticsPage /></DashboardLayout></ProtectedRoute>} />
         <Route path="/recovery" element={<ProtectedRoute><DashboardLayout><RecoveryCasesPage /></DashboardLayout></ProtectedRoute>} />
+        <Route path="/batch" element={<ProtectedRoute><DashboardLayout><BatchUploadPage /></DashboardLayout></ProtectedRoute>} />
+        <Route path="/profile" element={<ProtectedRoute><DashboardLayout><UserProfilePage /></DashboardLayout></ProtectedRoute>} />
 
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

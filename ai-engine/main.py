@@ -37,6 +37,7 @@ class TransactionPayload(BaseModel):
     receiverVpa: str
     location: str
     timestamp: str
+    userId: str = None
 
 @app.get("/")
 def home():
@@ -99,12 +100,31 @@ def analyze_transaction_post(txn: TransactionPayload):
     else:
         amount_risk = 1.0
 
-    # Production scoring — GNN + heuristics + amount risk
+    # NEW: Behavioral anomaly score via Node.js
+    behavioral_score = 0.0
+    if txn.userId:
+        try:
+            # Synchronous call since FastAPI is sync here, using httpx sync mode implicitly
+            profile_resp = httpx.post(
+                f"http://localhost:5000/api/users/{txn.userId}/profile-check",
+                json={"transaction": txn.model_dump()},
+                timeout=5.0
+            )
+            if profile_resp.status_code == 200:
+                profile_data = profile_resp.json()
+                if profile_data.get("isAnomalous"):
+                    behavioral_score = 0.10
+                    print(f"DEBUG [Behavioral]: Anomaly detected: {profile_data.get('anomalousFactors')}")
+        except Exception as e:
+            print(f"DEBUG [Behavioral Check Failed]: {e}")
+
+    # Production scoring — GNN + heuristics + amount risk + behavior
     final_score = (
-        (0.40 * gnn_score) +
+        (0.35 * gnn_score) +           # Reduced from 0.40
         (0.20 * location_risk_score) +
-        (0.25 * amount_risk) +
-        (0.15 * velocity_score_normalized)
+        (0.20 * amount_risk) +         # Scaled mapping limits
+        (0.15 * velocity_score_normalized) +
+        (0.10 * behavioral_score)       # NEW
     )
     final_score = float(final_score)
 
@@ -120,20 +140,62 @@ def analyze_transaction_post(txn: TransactionPayload):
     # 7. Explainability
     reason = generate_explanation(features_vector, final_score)
 
+    # NEW: Attribution breakdown
+    gnn_contribution = 0.35 * gnn_score
+    velocity_contribution = 0.15 * velocity_score_normalized
+    location_contribution = 0.20 * location_risk_score
+    amount_contribution = 0.20 * amount_risk
+    behavioral_contribution = 0.10 * behavioral_score
+    
+    attribution = {
+        "gnn": {
+            "weight": 0.35,
+            "value": gnn_score,
+            "contribution": gnn_contribution,
+            "reason": "Graph Neural Network detected patterns consistent with fraud ring activity"
+        },
+        "location": {
+            "weight": 0.20,
+            "value": location_risk_score,
+            "contribution": location_contribution,
+            "reason": f"Location '{txn.location}' is flagged as high-risk" if location_risk_score > 0.5 else "Location appears safe"
+        },
+        "amount": {
+            "weight": 0.20,
+            "value": amount_risk,
+            "contribution": amount_contribution,
+            "reason": f"Amount ₹{txn.amount:,.0f} is unusually large" if amount_risk > 0.5 else "Amount is within normal range"
+        },
+        "velocity": {
+            "weight": 0.15,
+            "value": velocity_score_normalized,
+            "contribution": velocity_contribution,
+            "reason": "High transaction velocity detected in short time window" if velocity_score_normalized > 0.3 else "Velocity is normal"
+        },
+        "behavioral": {
+            "weight": 0.10,
+            "value": behavioral_score,
+            "contribution": behavioral_contribution,
+            "reason": "Transaction deviates from user's normal behavior pattern" if behavioral_score > 0.05 else "Behavior is consistent with user's pattern"
+        }
+    }
+
     # 8. Response — contract unchanged for Node.js compatibility
     if final_score >= GNN_THRESHOLD:
         response_dict = {
             "status": "High Risk",
             "action": "FREEZE",
             "reason": reason,
-            "riskScore": final_score
+            "riskScore": final_score,
+            "attribution": attribution
         }
     else:
         response_dict = {
             "status": "Safe",
             "action": "ALLOW",
             "reason": reason,
-            "riskScore": final_score
+            "riskScore": final_score,
+            "attribution": attribution
         }
         
     print(f"DEBUG [Response generated]: {response_dict}")

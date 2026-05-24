@@ -5,6 +5,8 @@ import transactionRoutes from "./routes/transaction.routes.js";
 import { errorHandler } from "./middleware/error.middleware.js";
 import recoveryRoutes from "./routes/recovery.routes.js";
 import alertRoutes from "./routes/alert.routes.js";
+import userRoutes from "./routes/user.routes.js";
+import batchRoutes from "./routes/batch.routes.js";
 
 const app = express();
 
@@ -22,6 +24,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/transactions", transactionRoutes);
 app.use("/api/recovery", recoveryRoutes);
 app.use("/api/alerts", alertRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/batches", batchRoutes);
 
 // --- Global Error Handler (must be last) ---
 app.use(errorHandler);

@@ -23,9 +23,42 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
 
   sentTransactions     Transaction[] @relation("SenderTransactions")
-  receivedTransactions Transaction[] @relation("ReceiverTransactions")
+  profile              UserProfile?
+
+  batchJobs BatchJob[]
 
   @@map("users")
+}
+
+model UserProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Computed from transaction history
+  avgTransactionAmount Float @default(0)
+  minTransactionAmount Float @default(0)
+  maxTransactionAmount Float @default(0)
+  stdDevAmount         Float @default(0)
+
+  // Time patterns
+  mostCommonHour        Int   @default(10) // 0-23
+  nightTransactionRatio Float @default(0) // % txns between 00:00-06:00
+
+  // Behavioral patterns
+  favoriteReceiverVpas String[] @default([]) // Top 5 receiver VPAs
+  favoriteLocations    String[] @default([]) // Top 5 locations
+
+  // Anomaly thresholds (learned from user's own data)
+  amountZscoreThreshold Float @default(2.5) // Flag if amount > mean + 2.5*stddev
+  velocityThreshold     Int   @default(10) // Flag if > 10 txns in 60 seconds
+
+  // Metadata
+  transactionsProcessed Int      @default(0)
+  profileUpdatedAt      DateTime @updatedAt
+  createdAt             DateTime @default(now())
+
+  @@map("user_profiles")
 }
 
 model Transaction {
@@ -41,13 +74,16 @@ model Transaction {
   reason      String?
   timestamp   DateTime          @default(now())
 
-  sender   User @relation("SenderTransactions", fields: [senderVpa], references: [upiVpa])
-  receiver User @relation("ReceiverTransactions", fields: [receiverVpa], references: [upiVpa])
+  sender        User           @relation("SenderTransactions", fields: [senderVpa], references: [upiVpa])
   recoveryCases RecoveryCase[]
 
-  whatsappAlertSent  Boolean  @default(false)
-  voiceAlertSent     Boolean  @default(false)
-  alertSentAt        DateTime?
+  whatsappAlertSent Boolean   @default(false)
+  voiceAlertSent    Boolean   @default(false)
+  alertSentAt       DateTime?
+  attributionData   String?   @map("attribution_data")
+
+  batchId String?
+  batch   BatchJob? @relation("BatchTransactions", fields: [batchId], references: [id])
 
   @@index([senderVpa])
   @@index([receiverVpa])
@@ -65,21 +101,51 @@ enum RecoveryStatus {
 }
 
 model RecoveryCase {
-  id                String         @id @default(uuid())
-  transactionId     String         @unique
-  transaction       Transaction    @relation(fields: [transactionId], references: [id])
-  status            RecoveryStatus @default(INITIATED)
-  initiatedAt       DateTime       @default(now())
-  bankNotifiedAt    DateTime?
-  rbiEscalatedAt    DateTime?
-  resolvedAt        DateTime?
-  expiresAt         DateTime
-  complainantName   String
-  complainantEmail  String
-  complainantVpa    String
-  amountDisputed    Decimal
-  notes             String?
-  pdfPath           String?
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  id               String         @id @default(uuid())
+  transactionId    String         @unique
+  transaction      Transaction    @relation(fields: [transactionId], references: [id])
+  status           RecoveryStatus @default(INITIATED)
+  initiatedAt      DateTime       @default(now())
+  bankNotifiedAt   DateTime?
+  rbiEscalatedAt   DateTime?
+  resolvedAt       DateTime?
+  expiresAt        DateTime
+  complainantName  String
+  complainantEmail String
+  complainantVpa   String
+  amountDisputed   Decimal
+  notes            String?
+  pdfPath          String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+}
+
+model BatchJob {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // File info
+  fileName String
+  fileSize Int
+
+  // Processing stats
+  totalCount     Int @default(0)
+  processedCount Int @default(0)
+  frozenCount    Int @default(0)
+  allowedCount   Int @default(0)
+
+  // Report data (stored as JSON)
+  reportData String?
+
+  // Status
+  status       String  @default("PROCESSING")
+  errorMessage String?
+
+  // Timestamps
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  // Relations
+  transactions Transaction[] @relation("BatchTransactions")
 }

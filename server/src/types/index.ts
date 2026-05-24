@@ -39,11 +39,27 @@ export interface AIEngineRequest {
     timestamp: string;
 }
 
+export interface AttributionComponent {
+    weight: number;
+    value: number;
+    contribution: number;
+    reason: string;
+}
+
+export interface FeatureAttribution {
+    gnn: AttributionComponent;
+    location: AttributionComponent;
+    amount: AttributionComponent;
+    velocity: AttributionComponent;
+    behavioral: AttributionComponent;
+}
+
 export interface AIEngineResponse {
-    status: "High Risk" | "Safe";
-    action: "Freeze" | "Allow";
+    status: string;
+    action: string;
     reason: string;
     riskScore: number;
+    attribution?: FeatureAttribution;
 }
 
 // --- API Response Types ---

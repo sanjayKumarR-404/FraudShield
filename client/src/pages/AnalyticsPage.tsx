@@ -1,6 +1,22 @@
 import { useEffect, useState } from 'react';
 import { getAllTransactions, getAllRecoveryCases } from '../api/client';
 
+const COLORS: Record<string, string> = {
+    gnn: 'var(--color-accent)', // Blue
+    location: 'var(--color-danger)', // Red
+    amount: 'var(--color-warning)', // Orange/Yellow
+    velocity: '#facc15', // Yellow
+    behavioral: '#c084fc', // Purple
+};
+
+const LABELS: Record<string, string> = {
+    gnn: 'Graph Neural...',
+    location: 'Location Risk',
+    amount: 'Amount Spike',
+    velocity: 'Velocity Spike',
+    behavioral: 'Behavioral'
+};
+
 export default function AnalyticsPage() {
     const [transactions, setTransactions] = useState<any[]>([]);
     const [recoveries, setRecoveries] = useState<any[]>([]);
@@ -63,6 +79,34 @@ export default function AnalyticsPage() {
     }
     const trendSafe = getTrendPoints(totalTx, 7);
     const trendRisk = getTrendPoints(totalFrozen, 7);
+
+    // Feature Attribution Aggregation
+    const frozenWithAttribution = frozenTx.filter(t => t.attributionData);
+    let avgAttribution = { gnn: 0, location: 0, amount: 0, velocity: 0, behavioral: 0 };
+    if (frozenWithAttribution.length > 0) {
+        let sums = { gnn: 0, location: 0, amount: 0, velocity: 0, behavioral: 0 };
+        frozenWithAttribution.forEach(t => {
+            try {
+                const attr = typeof t.attributionData === 'string' ? JSON.parse(t.attributionData) : t.attributionData;
+                sums.gnn += attr.gnn?.contribution || 0;
+                sums.location += attr.location?.contribution || 0;
+                sums.amount += attr.amount?.contribution || 0;
+                sums.velocity += attr.velocity?.contribution || 0;
+                sums.behavioral += attr.behavioral?.contribution || 0;
+            } catch (e) { }
+        });
+        const count = frozenWithAttribution.length;
+        avgAttribution.gnn = sums.gnn / count;
+        avgAttribution.location = sums.location / count;
+        avgAttribution.amount = sums.amount / count;
+        avgAttribution.velocity = sums.velocity / count;
+        avgAttribution.behavioral = sums.behavioral / count;
+    }
+    const attributionComponents = Object.entries(avgAttribution).map(([key, contribution]) => ({
+        key,
+        contribution
+    })).sort((a, b) => b.contribution - a.contribution);
+    const sumContrib = attributionComponents.reduce((acc, c) => acc + c.contribution, 0);
 
     return (
         <div className="font-sans relative flex flex-col min-h-screen pb-20">
@@ -193,8 +237,57 @@ export default function AnalyticsPage() {
                         </div>
                     </div>
 
+                    {/* Top Risk Factors Across All Frozen Transactions */}
+                    <div className="bg-[var(--color-bg-card)] border border-[var(--color-border)] p-6 rounded-2xl shadow-lg lg:col-span-2">
+                        <h2 className="text-sm font-bold uppercase tracking-widest text-[#e2e8f0] flex items-center gap-2 mb-6">
+                            Top Risk Factors Across All Frozen Transactions
+                        </h2>
+                        {sumContrib > 0 ? (
+                            <div className="space-y-6">
+                                <div className="relative w-full h-12 bg-[var(--color-bg-primary)] rounded-lg overflow-hidden border border-[var(--color-border)] shadow-inner">
+                                    <svg width="100%" height="100%" viewBox="0 0 100 12" preserveAspectRatio="none">
+                                        {attributionComponents.reduce((acc, c) => {
+                                            const start = acc.currentOffset;
+                                            const pct = (c.contribution / sumContrib) * 100;
+                                            const nextOffset = start + pct;
+                                            acc.elements.push(
+                                                <rect
+                                                    key={c.key}
+                                                    x={start}
+                                                    y="0"
+                                                    width={pct}
+                                                    height="12"
+                                                    fill={COLORS[c.key]}
+                                                    className="transition-all duration-500 animate-in fade-in"
+                                                />
+                                            );
+                                            acc.currentOffset = nextOffset;
+                                            return acc;
+                                        }, { elements: [] as React.ReactNode[], currentOffset: 0 }).elements}
+                                    </svg>
+                                </div>
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                    {attributionComponents.map(c => {
+                                        const pct = (c.contribution / sumContrib) * 100;
+                                        return (
+                                            <div key={c.key} className="flex flex-col gap-1 items-center bg-[var(--color-bg-elevated)] p-3 rounded border border-[var(--color-border-subtle)]">
+                                                <span className="text-[10px] font-bold tracking-widest uppercase text-center" style={{ color: COLORS[c.key] }}>{LABELS[c.key]}</span>
+                                                <span className="text-xl font-black font-mono text-white">{pct.toFixed(1)}%</span>
+                                                <span className="text-[9px] text-[var(--color-text-muted)] font-mono">avg {c.contribution.toFixed(3)}</span>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="flex items-center justify-center p-8 bg-[var(--color-bg-elevated)] rounded border border-[var(--color-border-subtle)]">
+                                <span className="text-[10px] font-bold tracking-widest uppercase text-[var(--color-text-muted)]">No feature attribution vectors available.</span>
+                            </div>
+                        )}
+                    </div>
+
                     {/* Timeline */}
-                    <div className="bg-[var(--color-bg-card)] border border-[var(--color-border)] p-6 rounded-2xl shadow-lg max-h-[450px] overflow-y-auto custom-scrollbar">
+                    <div className="bg-[var(--color-bg-card)] border border-[var(--color-border)] p-6 rounded-2xl shadow-lg max-h-[450px] overflow-y-auto custom-scrollbar lg:col-span-1">
                         <h2 className="text-sm font-bold uppercase tracking-widest text-[#e2e8f0] flex items-center gap-2 mb-6 sticky top-0 bg-[var(--color-bg-card)] pb-4 z-10 border-b border-[var(--color-border)]">
                             Temporal Event Feed
                         </h2>
