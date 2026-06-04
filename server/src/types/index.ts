@@ -80,3 +80,56 @@ export interface ApiResponse<T = unknown> {
     message: string;
     data?: T;
 }
+
+// --- Recovery / FIR Types (Phase 19) ---
+
+export interface RecoveryCaseDetail {
+    id: string;
+    transactionId: string;
+    status: string;
+    firStatus: string;
+    firNumber?: string;
+    policeStationName?: string;
+    complainantName: string;
+    complainantEmail: string;
+    complainantPhone?: string;
+    bankName?: string;
+    accountNumber?: string;
+    amountDisputed: number;
+    evidenceUploads: string[];
+    screenshotsCount: number;
+    bankStatementsCount: number;
+    chatHistoriesCount: number;
+    initiatedAt: Date;
+    registeredAt?: Date;
+    estimatedResolutionAt?: Date;
+    expiresAt: Date;
+    resolvedAt?: Date;
+    recoveryAmount?: number;
+    recoveryDate?: Date;
+    pdfPath?: string;
+    firPdfPath?: string;
+    day30Reminded: boolean;
+    day60Reminded: boolean;
+    day85Reminded: boolean;
+}
+
+export interface FIRDocument {
+    firNumber: string;
+    reportDate: Date;
+    transactionId: string;
+    rrn: string;
+    amount: number;
+    senderVpa: string;
+    receiverVpa: string;
+    txTimestamp: Date;
+    riskScore?: number;
+    complainantName: string;
+    complainantEmail: string;
+    complainantPhone?: string;
+    bankName?: string;
+    accountNumber?: string;
+    screenshotsCount: number;
+    bankStatementsCount: number;
+    chatHistoriesCount: number;
+}

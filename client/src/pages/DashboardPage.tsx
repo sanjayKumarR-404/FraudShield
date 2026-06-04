@@ -133,6 +133,7 @@ export default function DashboardPage() {
     const [simResult, setSimResult] = useState<{ status: string, reason?: string, riskScore?: string, attribution?: Record<string, unknown> } | null>(null);
     const [showAnimation, setShowAnimation] = useState(false);
     const [animationResult, setAnimationResult] = useState<typeof simResult>(null);
+    const [animationKey, setAnimationKey] = useState(0);
 
     const [showBanner, setShowBanner] = useState(false);
     const [toast, setToast] = useState<{ message: string, type: 'error' | 'success' } | null>(null);
@@ -232,6 +233,7 @@ export default function DashboardPage() {
             const result = { status: res.status, reason: res.reason, riskScore: res.riskScore, attribution: res.attribution };
             setAnimationResult(result);
             setShowAnimation(true);
+            setAnimationKey(k => k + 1);
 
             if (res.status === 'FROZEN') {
                 setShowBanner(true);
@@ -291,10 +293,12 @@ export default function DashboardPage() {
             {/* Scoring Animation Overlay */}
             {showAnimation && animationResult && (
                 <ScoringAnimation
+                    key={animationKey}
                     attribution={animationResult.attribution as Record<string, { weight: number; value: number; contribution: number; reason: string }> | null}
                     finalScore={Number(animationResult.riskScore) || 0}
                     status={animationResult.status === 'FROZEN' ? 'FROZEN' : 'SUCCESS'}
                     onComplete={handleAnimationComplete}
+                    autoPlay={true}
                     onSkip={handleSkipAnimation}
                 />
             )}

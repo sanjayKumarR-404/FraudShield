@@ -3,13 +3,13 @@ import * as recoveryService from '../services/recovery.service.js';
 
 export const initiate = async (req: Request, res: Response) => {
     try {
-        const { transactionId, complainantName, complainantEmail, complainantVpa, amountDisputed, notes } = req.body;
-        if (!transactionId || !complainantName || !complainantEmail || !complainantVpa || amountDisputed == null) {
+        const { transactionId, complainantName, complainantEmail, notes } = req.body;
+        if (!transactionId || !complainantName || !complainantEmail) {
             res.status(400).json({ error: "Missing required fields" });
             return;
         }
         const updatedCase = await recoveryService.initiateRecovery(transactionId, {
-            complainantName, complainantEmail, complainantVpa, amountDisputed, notes
+            complainantName, complainantEmail, notes
         });
         res.status(201).json({ data: updatedCase });
     } catch (error: any) {

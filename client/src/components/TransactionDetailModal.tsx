@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import client, { getRecoveryByTransaction, initiateRecovery, getReceiverProfile } from '../api/client';
+import client, { getRecoveryByTransaction, getReceiverProfile } from '../api/client';
 import FeatureAttributionChart from './FeatureAttributionChart';
 
 interface ReceiverProfileData {
@@ -29,6 +29,10 @@ export default function TransactionDetailModal({ tx, onClose }: { tx: any, onClo
     const [loading, setLoading] = useState(true);
     const [initLoading, setInitLoading] = useState(false);
     const [receiverProfile, setReceiverProfile] = useState<ReceiverProfileData | null>(null);
+    const [showRecoveryForm, setShowRecoveryForm] = useState(false);
+    const [recoveryForm, setRecoveryForm] = useState({
+        name: '', email: '', phone: '', vpa: '', bankName: '', accountNumber: '', description: ''
+    });
 
     useEffect(() => {
         if (!tx) return;
@@ -69,14 +73,44 @@ export default function TransactionDetailModal({ tx, onClose }: { tx: any, onClo
     const rotation = -90 + (riskScore * 180); // maps 0 to -90deg, 1 to 90deg
 
     const handleInitiate = async () => {
+        if (!recoveryForm.name || !recoveryForm.email) {
+            alert('Name and email are required.');
+            return;
+        }
         setInitLoading(true);
         try {
-            await initiateRecovery(tx.id, "Internal Alert Agent", "agent@fraudshield", tx.senderVpa, Number(tx.amount));
-            const data = await getRecoveryByTransaction(tx.id);
-            setRecoveryInfo(data);
-        } catch (e) {
-            console.error(e);
-            alert("Failed to fast-track recovery.");
+            const response = await fetch('/api/recovery/initiate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('fraudshield_token')}`
+                },
+                body: JSON.stringify({
+                    transactionId: tx.id,
+                    complainantName: recoveryForm.name,
+                    complainantEmail: recoveryForm.email,
+                    complainantPhone: recoveryForm.phone,
+                    bankName: recoveryForm.bankName,
+                    accountNumber: recoveryForm.accountNumber,
+                    description: recoveryForm.description || ''
+                })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.details || error.error || 'Failed to initiate recovery');
+            }
+
+            const data = await response.json();
+            alert(`Recovery case created: ${data.caseId}`);
+            
+            // Refetch to show timeline
+            const rData = await getRecoveryByTransaction(tx.id);
+            setRecoveryInfo(rData);
+            setShowRecoveryForm(false);
+        } catch (e: any) {
+            console.error('Recovery error:', e);
+            alert(e.message || 'Failed to initiate recovery.');
         } finally {
             setInitLoading(false);
         }
@@ -280,13 +314,36 @@ export default function TransactionDetailModal({ tx, onClose }: { tx: any, onClo
                                         </div>
                                     </div>
                                 ) : tx.status === 'FROZEN' ? (
-                                    <button
-                                        onClick={handleInitiate}
-                                        disabled={initLoading}
-                                        className="w-full text-[10px] font-bold uppercase tracking-widest py-2 rounded-md bg-[var(--color-accent)]/10 text-[var(--color-accent)] border border-[var(--color-accent)]/30 hover:bg-[var(--color-accent)]/20 transition-colors disabled:opacity-50"
-                                    >
-                                        {initLoading ? 'Binding...' : 'Initiate Standard Recovery'}
-                                    </button>
+                                    <div className="space-y-2">
+                                        {!showRecoveryForm ? (
+                                            <button onClick={() => setShowRecoveryForm(true)}
+                                                className="w-full text-[10px] font-bold uppercase tracking-widest py-2 rounded-md bg-[var(--color-accent)]/10 text-[var(--color-accent)] border border-[var(--color-accent)]/30 hover:bg-[var(--color-accent)]/20 transition-all">
+                                                Initiate Recovery →
+                                            </button>
+                                        ) : (
+                                            <div className="space-y-2 p-3 bg-[var(--color-bg-primary)] rounded-xl border border-[var(--color-border)]">
+                                                <p className="text-[9px] font-bold uppercase tracking-widest text-[var(--color-accent)] mb-2">Recovery Details</p>
+                                                {[['Name *', 'name', 'Full Name', 'text'], ['Email *', 'email', 'email@example.com', 'email'], ['Phone', 'phone', '+91 XXXXXXXXXX', 'tel'], ['UPI VPA', 'vpa', 'your@upi', 'text'], ['Bank Name', 'bankName', 'SBI / HDFC...', 'text'], ['Account No.', 'accountNumber', 'XXXX XXXX', 'text']].map(([label, key, ph, type]) => (
+                                                    <div key={key}>
+                                                        <label className="text-[8px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">{label}</label>
+                                                        <input type={type} placeholder={ph} value={recoveryForm[key as keyof typeof recoveryForm]}
+                                                            onChange={e => setRecoveryForm(f => ({ ...f, [key]: e.target.value }))}
+                                                            className="w-full bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded px-2 py-1 text-[10px] text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)] mt-0.5" />
+                                                    </div>
+                                                ))}
+                                                <div className="flex gap-2 mt-3">
+                                                    <button onClick={handleInitiate} disabled={initLoading}
+                                                        className="flex-1 text-[9px] font-bold uppercase tracking-widest py-1.5 rounded bg-[var(--color-accent)] text-white disabled:opacity-50 hover:bg-blue-500 transition-all">
+                                                        {initLoading ? 'Submitting…' : 'Submit'}
+                                                    </button>
+                                                    <button onClick={() => setShowRecoveryForm(false)}
+                                                        className="px-3 text-[9px] font-bold uppercase tracking-widest rounded border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-white transition-all">
+                                                        ✕
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
                                 ) : (
                                     <p className="text-[10px] text-[var(--color-text-secondary)] italic">Not eligible for recovery map.</p>
                                 )}

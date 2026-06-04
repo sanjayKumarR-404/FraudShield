@@ -176,5 +176,58 @@ export const getAllReceiverProfiles = async () => {
     return res.data?.data || [];
 };
 
-export default client;
+// ── Phase 19: Recovery / FIR APIs ──────────────────────────────
 
+export const getRecoveryCase = async (caseId: string) => {
+    const res = await client.get(`/api/recovery/${caseId}`);
+    return res.data?.data || null;
+};
+
+export const uploadEvidenceFile = async (caseId: string, file: File, fileType: 'SCREENSHOT' | 'BANK_STATEMENT' | 'CHAT_HISTORY') => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('fileType', fileType);
+    const res = await client.post(`/api/recovery/${caseId}/upload-evidence`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return res.data?.data || {};
+};
+
+export const downloadFIR = async (caseId: string) => {
+    const token = localStorage.getItem('fraudshield_token');
+    const response = await fetch(`${API_URL}/api/recovery/${caseId}/fir`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!response.ok) throw new Error('Failed to generate FIR');
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `FIR_${caseId}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+};
+
+export const getComplaintLetters = async (caseId: string) => {
+    const res = await client.get(`/api/recovery/${caseId}/complaint-letters`);
+    return res.data?.data || null;
+};
+
+export const updateFIRStatus = async (caseId: string, status: string, firNumber?: string, policeStation?: string) => {
+    const res = await client.patch(`/api/recovery/${caseId}/fir-status`, { status, firNumber, policeStation });
+    return res.data?.data || {};
+};
+
+export const resolveCase = async (caseId: string, recoveryAmount: number, recoveryDate: string) => {
+    const res = await client.patch(`/api/recovery/${caseId}/resolve`, { recoveryAmount, recoveryDate });
+    return res.data?.data || {};
+};
+
+export const getReceiverTransactions = async (vpa: string) => {
+    const res = await client.get(`/api/receivers/${encodeURIComponent(vpa)}/transactions`);
+    return res.data?.data || [];
+};
+
+export default client;

@@ -75,7 +75,6 @@ model Transaction {
   timestamp   DateTime          @default(now())
 
   sender        User           @relation("SenderTransactions", fields: [senderVpa], references: [upiVpa])
-  recoveryCases RecoveryCase[]
 
   whatsappAlertSent Boolean   @default(false)
   voiceAlertSent    Boolean   @default(false)
@@ -101,23 +100,51 @@ enum RecoveryStatus {
 }
 
 model RecoveryCase {
-  id               String         @id @default(uuid())
-  transactionId    String         @unique
-  transaction      Transaction    @relation(fields: [transactionId], references: [id])
-  status           RecoveryStatus @default(INITIATED)
-  initiatedAt      DateTime       @default(now())
-  bankNotifiedAt   DateTime?
-  rbiEscalatedAt   DateTime?
-  resolvedAt       DateTime?
-  expiresAt        DateTime
-  complainantName  String
-  complainantEmail String
-  complainantVpa   String
-  amountDisputed   Decimal
-  notes            String?
-  pdfPath          String?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  id                    String   @id @default(uuid())
+  transactionId         String   @unique
+  
+  // Complainant details
+  complainantName       String
+  complainantEmail      String
+  complainantPhone      String?
+  bankName              String?
+  accountNumber         String?
+  
+  // Recovery tracking
+  status                String   @default("INITIATED")
+  description           String?
+  initiatedAt           DateTime @default(now())
+  expiresAt             DateTime
+  resolvedAt            DateTime?
+  
+  // FIR fields
+  firNumber             String?
+  firStatus             String   @default("INITIATED")
+  policeStationName     String?
+  evidenceUploads       String[] @default([])
+  screenshotsCount      Int      @default(0)
+  bankStatementsCount   Int      @default(0)
+  chatHistoriesCount    Int      @default(0)
+  firPdfPath            String?
+  registeredAt          DateTime?
+  estimatedResolutionAt DateTime?
+  
+  // Reminders
+  day30Reminded         Boolean  @default(false)
+  day60Reminded         Boolean  @default(false)
+  day85Reminded         Boolean  @default(false)
+  
+  // Resolution
+  recoveryAmount        Float?
+  recoveryDate          DateTime?
+  
+  // Legacy fields (keep for backward compat)
+  pdfPath               String?
+  
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  @@map("recovery_cases")
 }
 
 model BatchJob {

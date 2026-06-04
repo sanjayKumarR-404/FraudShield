@@ -95,4 +95,34 @@ router.get("/:vpa/profile", async (req, res, next) => {
     }
 });
 
+/**
+ * GET /api/receivers/:vpa/transactions
+ * Returns the last 50 transactions for a specific receiver VPA.
+ */
+router.get("/:vpa/transactions", async (req, res, next) => {
+    try {
+        const vpa = decodeURIComponent(req.params.vpa);
+        const transactions = await prisma.transaction.findMany({
+            where: { receiverVpa: vpa },
+            orderBy: { timestamp: 'desc' },
+            take: 50,
+            select: {
+                id: true,
+                rrn: true,
+                amount: true,
+                status: true,
+                senderVpa: true,
+                receiverVpa: true,
+                timestamp: true,
+                riskScore: true,
+                location: true,
+            }
+        });
+        return res.json({ success: true, data: transactions });
+    } catch (err) {
+        next(err);
+        return;
+    }
+});
+
 export default router;

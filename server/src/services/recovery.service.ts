@@ -4,7 +4,7 @@ import { generateDisputePDF } from './pdf.service.js';
 
 export const initiateRecovery = async (
     transactionId: string,
-    complainantDetails: { complainantName: string, complainantEmail: string, complainantVpa: string, amountDisputed: number, notes?: string }
+    complainantDetails: { complainantName: string, complainantEmail: string, notes?: string }
 ) => {
     const transaction = await prisma.transaction.findUnique({ where: { id: transactionId } });
     if (!transaction) throw new Error("Transaction not found");
@@ -19,9 +19,7 @@ export const initiateRecovery = async (
             expiresAt,
             complainantName: complainantDetails.complainantName,
             complainantEmail: complainantDetails.complainantEmail,
-            complainantVpa: complainantDetails.complainantVpa,
-            amountDisputed: complainantDetails.amountDisputed,
-            notes: complainantDetails.notes
+            description: complainantDetails.notes
         }
     });
 
@@ -41,14 +39,9 @@ export const advanceRecoveryState = async (caseId: string) => {
     let updateData: Prisma.RecoveryCaseUpdateInput = {};
 
     if (caseData.status === RecoveryStatus.INITIATED) {
-        updateData = { status: RecoveryStatus.BANK_NOTIFIED, bankNotifiedAt: now };
+        updateData = { status: RecoveryStatus.BANK_NOTIFIED };
     } else if (caseData.status === RecoveryStatus.BANK_NOTIFIED) {
-        if (!caseData.bankNotifiedAt) throw new Error("Missing bank notification date");
-        const diffDays = (now.getTime() - new Date(caseData.bankNotifiedAt).getTime()) / (1000 * 3600 * 24);
-        if (diffDays < 7) {
-            throw new Error("Cannot escalate to RBI before 7 days have passed since bank notification");
-        }
-        updateData = { status: RecoveryStatus.RBI_ESCALATED, rbiEscalatedAt: now };
+        updateData = { status: RecoveryStatus.RBI_ESCALATED };
     } else if (caseData.status === RecoveryStatus.RBI_ESCALATED) {
         updateData = { status: RecoveryStatus.RESOLVED, resolvedAt: now };
     } else {
@@ -78,15 +71,162 @@ export const checkExpiredCases = async () => {
 };
 
 export const getRecoveryCaseByTransaction = async (transactionId: string) => {
-    return await prisma.recoveryCase.findUnique({
-        where: { transactionId },
-        include: { transaction: true }
+    const caseData = await prisma.recoveryCase.findUnique({
+        where: { transactionId }
     });
+    if (!caseData) return null;
+    const transaction = await prisma.transaction.findUnique({ where: { id: transactionId } });
+    return { ...caseData, transaction };
 };
 
 export const getAllRecoveryCases = async () => {
-    return await prisma.recoveryCase.findMany({
-        orderBy: { initiatedAt: 'desc' },
-        include: { transaction: true }
+    const cases = await prisma.recoveryCase.findMany({
+        orderBy: { initiatedAt: 'desc' }
     });
+    const txIds = cases.map(c => c.transactionId);
+    const txs = await prisma.transaction.findMany({ where: { id: { in: txIds } } });
+    const txMap = new Map(txs.map(t => [t.id, t]));
+    return cases.map(c => ({ ...c, transaction: txMap.get(c.transactionId) }));
+};
+
+// ── Phase 19: Evidence Upload ──────────────────────────────────
+
+export const uploadEvidence = async (
+    caseId: string,
+    fileUrl: string,
+    fileType: 'SCREENSHOT' | 'BANK_STATEMENT' | 'CHAT_HISTORY'
+): Promise<void> => {
+    const caseData = await prisma.recoveryCase.findUnique({ where: { id: caseId } });
+    if (!caseData) throw new Error('Recovery case not found');
+
+    const updatedUploads = [...caseData.evidenceUploads, fileUrl];
+    const updateData: Record<string, unknown> = { evidenceUploads: updatedUploads };
+
+    if (fileType === 'SCREENSHOT') updateData.screenshotsCount = (caseData.screenshotsCount || 0) + 1;
+    if (fileType === 'BANK_STATEMENT') updateData.bankStatementsCount = (caseData.bankStatementsCount || 0) + 1;
+    if (fileType === 'CHAT_HISTORY') updateData.chatHistoriesCount = (caseData.chatHistoriesCount || 0) + 1;
+
+    await prisma.recoveryCase.update({ where: { id: caseId }, data: updateData });
+};
+
+// ── Phase 19: Generate FIR PDF ────────────────────────────────
+
+export const generateFIR = async (caseId: string): Promise<string> => {
+    const caseData = await prisma.recoveryCase.findUnique({
+        where: { id: caseId }
+    });
+    if (!caseData) throw new Error('Recovery case not found');
+    const transaction = await prisma.transaction.findUnique({ where: { id: caseData.transactionId } });
+    if (!transaction) throw new Error('Transaction not found');
+
+    const { generateFIRDocument } = await import('./pdf.service.js');
+    const firPath = await generateFIRDocument(caseData, transaction);
+
+    await prisma.recoveryCase.update({
+        where: { id: caseId },
+        data: { firPdfPath: firPath }
+    });
+
+    return firPath;
+};
+
+// ── Phase 19: Generate Complaint Letters ──────────────────────
+
+export const generateComplaintLetters = async (caseId: string): Promise<{ firPath: string; bankPath: string }> => {
+    const caseData = await prisma.recoveryCase.findUnique({
+        where: { id: caseId }
+    });
+    if (!caseData) throw new Error('Recovery case not found');
+    const transaction = await prisma.transaction.findUnique({ where: { id: caseData.transactionId } });
+    if (!transaction) throw new Error('Transaction not found');
+
+    const { generateFIRDocument } = await import('./pdf.service.js');
+    // Re-use the FIR generator for both documents (differentiate via filename)
+    const firPath = await generateFIRDocument(caseData, transaction);
+    const bankPath = await generateFIRDocument(
+        { ...caseData, description: 'BANK COMPLAINT COPY — For bank fraud investigation desk' },
+        transaction
+    );
+
+    await prisma.recoveryCase.update({
+        where: { id: caseId },
+        data: { firPdfPath: firPath }
+    });
+
+    return { firPath, bankPath };
+};
+
+// ── Phase 19: Update FIR Status ───────────────────────────────
+
+export const updateFIRStatus = async (
+    caseId: string,
+    status: 'REGISTERED' | 'INVESTIGATION' | 'CLOSED',
+    firNumber?: string,
+    policeStation?: string
+): Promise<unknown> => {
+    const updateData: Record<string, unknown> = { firStatus: status };
+
+    if (status === 'REGISTERED') updateData.registeredAt = new Date();
+    if (firNumber) updateData.firNumber = firNumber;
+    if (policeStation) updateData.policeStationName = policeStation;
+
+    return await prisma.recoveryCase.update({
+        where: { id: caseId },
+        data: updateData
+    });
+};
+
+// ── Phase 19: Mark Resolved ───────────────────────────────────
+
+export const markResolved = async (
+    caseId: string,
+    recoveryAmount: number,
+    recoveryDate: Date
+): Promise<unknown> => {
+    return await prisma.recoveryCase.update({
+        where: { id: caseId },
+        data: {
+            status: RecoveryStatus.RESOLVED,
+            resolvedAt: new Date(),
+            recoveryAmount,
+            recoveryDate,
+            firStatus: 'CLOSED'
+        }
+    });
+};
+
+// ── Phase 19: Reminders ───────────────────────────────────────
+
+export const checkAndSendReminders = async (): Promise<void> => {
+    const now = new Date();
+    const cases = await prisma.recoveryCase.findMany({
+        where: {
+            status: { notIn: [RecoveryStatus.RESOLVED, RecoveryStatus.EXPIRED, RecoveryStatus.FAILED] }
+        }
+    });
+
+    for (const c of cases) {
+        const daysSince = Math.floor((now.getTime() - new Date(c.initiatedAt).getTime()) / (1000 * 60 * 60 * 24));
+        const updates: Record<string, boolean> = {};
+
+        if (daysSince >= 30 && !c.day30Reminded) updates.day30Reminded = true;
+        if (daysSince >= 60 && !c.day60Reminded) updates.day60Reminded = true;
+        if (daysSince >= 85 && !c.day85Reminded) updates.day85Reminded = true;
+
+        if (Object.keys(updates).length > 0) {
+            await prisma.recoveryCase.update({ where: { id: c.id }, data: updates });
+            console.log(`[RecoveryReminder] Case ${c.id} — Day ${daysSince} reminder flags set.`);
+        }
+    }
+};
+
+// ── Phase 19: Get Single Case ─────────────────────────────────
+
+export const getRecoveryCaseById = async (caseId: string) => {
+    const caseData = await prisma.recoveryCase.findUnique({
+        where: { id: caseId }
+    });
+    if (!caseData) return null;
+    const transaction = await prisma.transaction.findUnique({ where: { id: caseData.transactionId } });
+    return { ...caseData, transaction };
 };
