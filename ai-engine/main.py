@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
+from typing import Optional
 import torch
 import math
 import httpx
 import asyncio
+import os
 
 from redis_client import push_transaction, record_transaction_time, get_recent_transactions
 from features import extract_features
@@ -37,7 +39,8 @@ class TransactionPayload(BaseModel):
     receiverVpa: str
     location: str
     timestamp: str
-    userId: str = None
+    userId: Optional[str] = None
+    receiverRiskScore: Optional[float] = 0.0  # NEW: receiver-side risk intelligence
 
 @app.get("/")
 def home():
@@ -100,11 +103,10 @@ def analyze_transaction_post(txn: TransactionPayload):
     else:
         amount_risk = 1.0
 
-    # NEW: Behavioral anomaly score via Node.js
+    # 7. Behavioral anomaly score via Node.js
     behavioral_score = 0.0
     if txn.userId:
         try:
-            # Synchronous call since FastAPI is sync here, using httpx sync mode implicitly
             profile_resp = httpx.post(
                 f"http://localhost:5000/api/users/{txn.userId}/profile-check",
                 json={"transaction": txn.model_dump()},
@@ -118,13 +120,29 @@ def analyze_transaction_post(txn: TransactionPayload):
         except Exception as e:
             print(f"DEBUG [Behavioral Check Failed]: {e}")
 
-    # Production scoring — GNN + heuristics + amount risk + behavior
+    # 8. Receiver risk score (passed from Node.js backend)
+    receiver_risk_score = float(txn.receiverRiskScore or 0.0)
+    receiver_category = "UNKNOWN"
+    if receiver_risk_score < 0.2:
+        receiver_category = "SAFE"
+    elif receiver_risk_score < 0.5:
+        receiver_category = "SUSPICIOUS"
+    elif receiver_risk_score < 0.8:
+        receiver_category = "HIGH_RISK"
+    else:
+        receiver_category = "FRAUD_MULE"
+
+    print(f"DEBUG [Receiver Risk]: score={receiver_risk_score}, category={receiver_category}")
+
+    # 9. Production scoring — updated weights (sum to 1.0)
+    # GNN: 0.30, Location: 0.20, Amount: 0.15, Velocity: 0.15, Behavioral: 0.10, Receiver: 0.10
     final_score = (
-        (0.35 * gnn_score) +           # Reduced from 0.40
+        (0.30 * gnn_score) +               # Reduced from 0.35
         (0.20 * location_risk_score) +
-        (0.20 * amount_risk) +         # Scaled mapping limits
+        (0.15 * amount_risk) +             # Reduced from 0.20
         (0.15 * velocity_score_normalized) +
-        (0.10 * behavioral_score)       # NEW
+        (0.10 * behavioral_score) +
+        (0.10 * receiver_risk_score)        # NEW: receiver-side intelligence
     )
     final_score = float(final_score)
 
@@ -137,19 +155,20 @@ def analyze_transaction_post(txn: TransactionPayload):
 
     print(f"DEBUG [Scoring Phase]: amount_risk={amount_risk}, final_score={final_score}")
 
-    # 7. Explainability
+    # 10. Explainability
     reason = generate_explanation(features_vector, final_score)
 
-    # NEW: Attribution breakdown
-    gnn_contribution = 0.35 * gnn_score
+    # 11. Attribution breakdown — updated weights
+    gnn_contribution = 0.30 * gnn_score
     velocity_contribution = 0.15 * velocity_score_normalized
     location_contribution = 0.20 * location_risk_score
-    amount_contribution = 0.20 * amount_risk
+    amount_contribution = 0.15 * amount_risk
     behavioral_contribution = 0.10 * behavioral_score
+    receiver_contribution = 0.10 * receiver_risk_score
     
     attribution = {
         "gnn": {
-            "weight": 0.35,
+            "weight": 0.30,
             "value": gnn_score,
             "contribution": gnn_contribution,
             "reason": "Graph Neural Network detected patterns consistent with fraud ring activity"
@@ -161,7 +180,7 @@ def analyze_transaction_post(txn: TransactionPayload):
             "reason": f"Location '{txn.location}' is flagged as high-risk" if location_risk_score > 0.5 else "Location appears safe"
         },
         "amount": {
-            "weight": 0.20,
+            "weight": 0.15,
             "value": amount_risk,
             "contribution": amount_contribution,
             "reason": f"Amount ₹{txn.amount:,.0f} is unusually large" if amount_risk > 0.5 else "Amount is within normal range"
@@ -177,10 +196,16 @@ def analyze_transaction_post(txn: TransactionPayload):
             "value": behavioral_score,
             "contribution": behavioral_contribution,
             "reason": "Transaction deviates from user's normal behavior pattern" if behavioral_score > 0.05 else "Behavior is consistent with user's pattern"
+        },
+        "receiver": {
+            "weight": 0.10,
+            "value": receiver_risk_score,
+            "contribution": receiver_contribution,
+            "reason": f"Receiver VPA has {receiver_category} risk profile" if receiver_risk_score > 0 else "Receiver has no prior fraud history"
         }
     }
 
-    # 8. Response — contract unchanged for Node.js compatibility
+    # 12. Response — contract unchanged for Node.js compatibility
     if final_score >= GNN_THRESHOLD:
         response_dict = {
             "status": "High Risk",
@@ -217,7 +242,6 @@ async def trigger_freeze_alert(payload: AlertPayload):
     """
     try:
         async with httpx.AsyncClient() as client:
-            # We explicitly target the unified test boundary allowing external loopback if authenticated locally
             response = await client.post(
                 "http://localhost:5000/api/alerts/test",
                 json={"transactionId": payload.transactionId},

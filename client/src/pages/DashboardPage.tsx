@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getAllTransactions, processTransaction} from '../api/client';
+import { getAllTransactions, processTransaction, getReceiverProfile } from '../api/client';
 import TransactionDetailModal from '../components/TransactionDetailModal';
+import ScoringAnimation from '../components/ScoringAnimation';
 
 // Provide standard types
 interface Transaction {
@@ -20,6 +21,11 @@ interface Transaction {
     whatsappAlertSent?: boolean;
     voiceAlertSent?: boolean;
     alertSentAt?: string;
+    attributionData?: string;
+}
+
+interface ReceiverRiskCache {
+    [vpa: string]: { category: string; score: number };
 }
 
 const AnimatedCounter = ({ end, duration = 1000 }: { end: number, duration?: number }) => {
@@ -54,7 +60,6 @@ const Sparkline = ({ type }: { type: 'success' | 'danger' | 'neutral' }) => {
         danger: 'fill-[var(--color-danger)]/10',
         neutral: 'fill-[var(--color-accent)]/10'
     };
-
     return (
         <svg className={`w-16 h-8 ${colors[type]}`} viewBox="0 0 100 30" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M0 25C10 25 15 10 25 10C35 10 40 20 50 15C60 10 70 25 80 15C90 5 95 5 100 5V30H0V25Z" className={`stroke-none ${fillColors[type]}`} />
@@ -63,17 +68,71 @@ const Sparkline = ({ type }: { type: 'success' | 'danger' | 'neutral' }) => {
     );
 };
 
+const ReceiverRiskBadge = ({ category }: { category?: string }) => {
+    if (!category || category === 'UNKNOWN') return <span className="text-[9px] font-bold text-[var(--color-text-muted)] uppercase">—</span>;
+    const styles: Record<string, string> = {
+        SAFE: 'bg-[#10b981]/10 text-[#10b981] border-[#10b981]/30',
+        SUSPICIOUS: 'bg-[#f59e0b]/10 text-[#f59e0b] border-[#f59e0b]/30',
+        HIGH_RISK: 'bg-[#f97316]/10 text-[#f97316] border-[#f97316]/30',
+        FRAUD_MULE: 'bg-[#ef4444]/10 text-[#ef4444] border-[#ef4444]/30 badge-mule',
+    };
+    const labels: Record<string, string> = {
+        SAFE: 'SAFE', SUSPICIOUS: 'SUSP', HIGH_RISK: 'HIGH', FRAUD_MULE: 'MULE'
+    };
+    return (
+        <span className={`inline-flex px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest rounded border ${styles[category] || ''}`}>
+            {labels[category] || category}
+        </span>
+    );
+};
+
+const ThemeToggle = () => {
+    const [isDark, setIsDark] = useState(() => {
+        const saved = localStorage.getItem('fraudshield_theme');
+        return saved ? saved === 'dark' : true;
+    });
+
+    const toggle = () => {
+        const newTheme = isDark ? 'light' : 'dark';
+        setIsDark(!isDark);
+        document.documentElement.setAttribute('data-theme', newTheme);
+        localStorage.setItem('fraudshield_theme', newTheme);
+    };
+
+    return (
+        <button
+            onClick={toggle}
+            title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+            className="flex items-center gap-2 px-3 py-1.5 rounded border border-[var(--color-border)] bg-[var(--color-bg-elevated)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-accent)] transition-all text-xs font-bold"
+        >
+            {isDark ? (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+            ) : (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                </svg>
+            )}
+            <span className="hidden sm:inline">{isDark ? 'Light' : 'Dark'}</span>
+        </button>
+    );
+};
+
 export default function DashboardPage() {
     const navigate = useNavigate();
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [loading, setLoading] = useState(true);
+    const [receiverRiskCache, setReceiverRiskCache] = useState<ReceiverRiskCache>({});
 
     const [simSender, setSimSender] = useState('');
     const [simReceiver, setSimReceiver] = useState('');
     const [simAmount, setSimAmount] = useState('');
     const [simLocation, setSimLocation] = useState('');
     const [simLoading, setSimLoading] = useState(false);
-    const [simResult, setSimResult] = useState<{ status: string, reason?: string, riskScore?: string } | null>(null);
+    const [simResult, setSimResult] = useState<{ status: string, reason?: string, riskScore?: string, attribution?: Record<string, unknown> } | null>(null);
+    const [showAnimation, setShowAnimation] = useState(false);
+    const [animationResult, setAnimationResult] = useState<typeof simResult>(null);
 
     const [showBanner, setShowBanner] = useState(false);
     const [toast, setToast] = useState<{ message: string, type: 'error' | 'success' } | null>(null);
@@ -92,10 +151,36 @@ export default function DashboardPage() {
         return () => clearInterval(timer);
     }, []);
 
+    // Apply saved theme on mount
+    useEffect(() => {
+        const saved = localStorage.getItem('fraudshield_theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', saved);
+    }, []);
+
     const showToast = (message: string, type: 'error' | 'success' = 'error') => {
         setToast({ message, type });
         setTimeout(() => setToast(null), 4000);
     };
+
+    const fetchReceiverRisk = useCallback(async (vpas: string[]) => {
+        const uncached = vpas.filter(vpa => !receiverRiskCache[vpa]);
+        if (uncached.length === 0) return;
+
+        const results = await Promise.allSettled(
+            uncached.map(vpa => getReceiverProfile(vpa))
+        );
+
+        const newCache: ReceiverRiskCache = {};
+        results.forEach((result, i) => {
+            if (result.status === 'fulfilled' && result.value) {
+                newCache[uncached[i]] = {
+                    category: result.value.riskCategory || 'UNKNOWN',
+                    score: result.value.riskScore || 0,
+                };
+            }
+        });
+        setReceiverRiskCache(prev => ({ ...prev, ...newCache }));
+    }, [receiverRiskCache]);
 
     const fetchTransactions = async () => {
         try {
@@ -112,6 +197,10 @@ export default function DashboardPage() {
                 return newTransactions;
             });
             setLoading(false);
+
+            // Batch fetch receiver risk for visible transactions
+            const receiverVpas = newTransactions.slice(0, 50).map((t: Transaction) => t.receiverVpa) as string[];
+            fetchReceiverRisk([...new Set<string>(receiverVpas)]);
         } catch (err) {
             console.error("Pipeline failure:", err);
             setLoading(false);
@@ -140,17 +229,32 @@ export default function DashboardPage() {
         setSimResult(null);
         try {
             const res = await processTransaction(simSender, simReceiver, Number(simAmount), simLocation);
-            setSimResult({ status: res.status, reason: res.reason, riskScore: res.riskScore });
+            const result = { status: res.status, reason: res.reason, riskScore: res.riskScore, attribution: res.attribution };
+            setAnimationResult(result);
+            setShowAnimation(true);
+
             if (res.status === 'FROZEN') {
                 setShowBanner(true);
                 setTimeout(() => setShowBanner(false), 6000);
             }
-            fetchTransactions();
-        } catch (err: any) {
-            showToast("Simulation failed: " + (err.response?.data?.error || err.message));
+        } catch (err: unknown) {
+            const axiosErr = err as { response?: { data?: { error?: string } }; message?: string };
+            showToast("Simulation failed: " + (axiosErr.response?.data?.error || axiosErr.message));
         } finally {
             setSimLoading(false);
         }
+    };
+
+    const handleAnimationComplete = () => {
+        setShowAnimation(false);
+        setSimResult(animationResult);
+        fetchTransactions();
+    };
+
+    const handleSkipAnimation = () => {
+        setShowAnimation(false);
+        setSimResult(animationResult);
+        fetchTransactions();
     };
 
     const handleLogout = () => {
@@ -184,6 +288,17 @@ export default function DashboardPage() {
 
     return (
         <div className="font-sans relative">
+            {/* Scoring Animation Overlay */}
+            {showAnimation && animationResult && (
+                <ScoringAnimation
+                    attribution={animationResult.attribution as Record<string, { weight: number; value: number; contribution: number; reason: string }> | null}
+                    finalScore={Number(animationResult.riskScore) || 0}
+                    status={animationResult.status === 'FROZEN' ? 'FROZEN' : 'SUCCESS'}
+                    onComplete={handleAnimationComplete}
+                    onSkip={handleSkipAnimation}
+                />
+            )}
+
             {/* Top Loading Indicator Pulse */}
             <div className="fixed top-0 left-0 w-full h-[2px] bg-[var(--color-bg-elevated)] z-50">
                 <div className="h-full bg-[var(--color-accent)] animate-[pulse_2s_ease-in-out_infinite]" style={{ width: '100%', filter: 'drop-shadow(0 0 4px var(--color-accent))' }}></div>
@@ -195,7 +310,7 @@ export default function DashboardPage() {
                     <div className="bg-[var(--color-danger)] text-white w-full py-2.5 px-4 font-semibold shadow-2xl flex items-center justify-center gap-3 overflow-hidden relative">
                         <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, #000 10px, #000 20px)' }}></div>
                         <span className="animate-pulse relative z-10">🚨</span>
-                        <span className="relative z-10 tracking-wide text-sm uppercase">URGENT CAPTURE: High-risk fraudulent transaction intercepted & frozen by AI Engine.</span>
+                        <span className="relative z-10 tracking-wide text-sm uppercase">URGENT CAPTURE: High-risk fraudulent transaction intercepted &amp; frozen by AI Engine.</span>
                     </div>
                 </div>
             )}
@@ -217,13 +332,14 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="hidden lg:flex flex-col items-center justify-center absolute left-1/2 -translate-x-1/2">
-                    <span className="text-sm font-mono text-white tracking-wider">{nowTime.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).toUpperCase()}</span>
+                    <span className="text-sm font-mono text-[var(--color-text-primary)] tracking-wider">{nowTime.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).toUpperCase()}</span>
                     <span className="text-xs font-mono text-[var(--color-text-muted)]">{nowTime.toLocaleTimeString('en-US', { hour12: false })}</span>
                 </div>
 
-                <div className="flex items-center gap-5 ml-auto">
-                    <button onClick={handleLogout} className="text-xs font-bold uppercase tracking-widest px-3 py-1.5 rounded transition shadow-sm bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-white hover:bg-[var(--color-border-subtle)] active:scale-[0.97]">
-                        Logout System
+                <div className="flex items-center gap-3 ml-auto">
+                    <ThemeToggle />
+                    <button onClick={handleLogout} className="text-xs font-bold uppercase tracking-widest px-3 py-1.5 rounded transition shadow-sm bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border-subtle)] active:scale-[0.97]">
+                        Logout
                     </button>
                 </div>
             </header>
@@ -235,7 +351,7 @@ export default function DashboardPage() {
                         <div className="flex justify-between items-start">
                             <div>
                                 <p className="text-[10px] font-bold tracking-widest uppercase text-[var(--color-text-muted)] mb-1">Total Volume</p>
-                                <p className="text-3xl font-bold text-white font-mono"><AnimatedCounter end={totalTx} duration={1000} /></p>
+                                <p className="text-3xl font-bold text-[var(--color-text-primary)] font-mono"><AnimatedCounter end={totalTx} duration={1000} /></p>
                             </div>
                             <Sparkline type="neutral" />
                         </div>
@@ -245,7 +361,7 @@ export default function DashboardPage() {
                         <div className="flex justify-between items-start">
                             <div>
                                 <p className="text-[10px] font-bold tracking-widest uppercase text-[var(--color-text-muted)] mb-1">Verified Base</p>
-                                <p className="text-3xl font-bold text-white font-mono"><AnimatedCounter end={successCount} duration={1200} /></p>
+                                <p className="text-3xl font-bold text-[var(--color-text-primary)] font-mono"><AnimatedCounter end={successCount} duration={1200} /></p>
                             </div>
                             <Sparkline type="success" />
                         </div>
@@ -256,7 +372,7 @@ export default function DashboardPage() {
                         <div className="flex justify-between items-start relative z-10">
                             <div>
                                 <p className="text-[10px] font-bold tracking-widest uppercase text-[var(--color-text-muted)] mb-1">Frozen (Intercepted)</p>
-                                <p className={`text-3xl font-bold font-mono ${frozenCount > 0 ? 'text-[var(--color-danger)]' : 'text-white'}`}><AnimatedCounter end={frozenCount} duration={1500} /></p>
+                                <p className={`text-3xl font-bold font-mono ${frozenCount > 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-primary)]'}`}><AnimatedCounter end={frozenCount} duration={1500} /></p>
                             </div>
                             <Sparkline type="danger" />
                         </div>
@@ -273,18 +389,18 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                    {/* Simulator Form Redesigned */}
+                    {/* Injection Console */}
                     <div className="xl:col-span-1 bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-2xl overflow-hidden shadow-lg hover:border-[var(--color-border-subtle)] transition-all duration-300 flex flex-col max-h-[780px]">
-                        <div className="px-5 py-4 border-b border-[var(--color-border)] bg-[#111927]">
-                            <h2 className="text-sm font-bold uppercase tracking-widest text-[#e2e8f0] flex items-center gap-2">
-                                <svg className="w-4 h-4 text-[#3b82f6]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                Injection Console <span className="animate-pulse w-1.5 h-4 bg-[#3b82f6] ml-1 inline-block"></span>
+                        <div className="px-5 py-4 border-b border-[var(--color-border)] bg-[var(--color-bg-elevated)]">
+                            <h2 className="text-sm font-bold uppercase tracking-widest text-[var(--color-text-primary)] flex items-center gap-2">
+                                <svg className="w-4 h-4 text-[var(--color-accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                Injection Console <span className="animate-pulse w-1.5 h-4 bg-[var(--color-accent)] ml-1 inline-block"></span>
                             </h2>
                         </div>
 
-                        <div className="p-5 flex-1 flex flex-col space-y-5 bg-[#080d14] overflow-y-auto w-full">
+                        <div className="p-5 flex-1 flex flex-col space-y-5 bg-[var(--color-bg-primary)] overflow-y-auto w-full">
                             <div className="flex gap-2">
-                                <button type="button" onClick={() => applyPreset('safe')} className="flex-1 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-white hover:border-[var(--color-accent)] rounded shadow transition-all active:scale-[0.98]">Safe Payload</button>
+                                <button type="button" onClick={() => applyPreset('safe')} className="flex-1 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-[var(--color-text-primary)] hover:border-[var(--color-accent)] rounded shadow transition-all active:scale-[0.98]">Safe Payload</button>
                                 <button type="button" onClick={() => applyPreset('suspicious')} className="flex-1 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-[var(--color-warning)] hover:border-[var(--color-warning)] rounded shadow transition-all active:scale-[0.98]">Suspicious</button>
                                 <button type="button" onClick={() => applyPreset('high')} className="flex-1 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-[var(--color-danger)] hover:border-[var(--color-danger)] rounded shadow transition-all active:scale-[0.98]">High Risk</button>
                             </div>
@@ -292,14 +408,14 @@ export default function DashboardPage() {
                             <form onSubmit={handleSimulate} className="space-y-4 flex-1 flex flex-col">
                                 <div className="space-y-3">
                                     <div>
-                                        <input type="text" required value={simSender} onChange={e => setSimSender(e.target.value)} className="w-full bg-[var(--color-bg-card)] text-[#10b981] border border-[var(--color-border)] rounded p-3 text-sm focus:outline-none focus:border-[var(--color-accent)] font-mono tracking-wider transition placeholder-[#10b981]/40" placeholder="> SENDER_VPA" />
+                                        <input type="text" required value={simSender} onChange={e => setSimSender(e.target.value)} className="w-full bg-[var(--color-bg-card)] text-[var(--color-success)] border border-[var(--color-border)] rounded p-3 text-sm focus:outline-none focus:border-[var(--color-accent)] font-mono tracking-wider transition placeholder-[var(--color-success)]/40" placeholder="> SENDER_VPA" />
                                     </div>
                                     <div>
-                                        <input type="text" required value={simReceiver} onChange={e => setSimReceiver(e.target.value)} className="w-full bg-[var(--color-bg-card)] text-[#10b981] border border-[var(--color-border)] rounded p-3 text-sm focus:outline-none focus:border-[var(--color-accent)] font-mono tracking-wider transition placeholder-[#10b981]/40" placeholder="> RECEIVER_VPA" />
+                                        <input type="text" required value={simReceiver} onChange={e => setSimReceiver(e.target.value)} className="w-full bg-[var(--color-bg-card)] text-[var(--color-success)] border border-[var(--color-border)] rounded p-3 text-sm focus:outline-none focus:border-[var(--color-accent)] font-mono tracking-wider transition placeholder-[var(--color-success)]/40" placeholder="> RECEIVER_VPA" />
                                     </div>
                                     <div className="grid grid-cols-2 gap-3">
-                                        <input type="number" required value={simAmount} onChange={e => setSimAmount(e.target.value)} className="w-full bg-[var(--color-bg-card)] text-[#10b981] border border-[var(--color-border)] rounded p-3 text-sm focus:outline-none focus:border-[var(--color-accent)] font-mono tracking-wider transition placeholder-[#10b981]/40" placeholder="> AMOUNT_INR" />
-                                        <input type="text" required value={simLocation} onChange={e => setSimLocation(e.target.value)} className="w-full bg-[var(--color-bg-card)] text-[#10b981] border border-[var(--color-border)] rounded p-3 text-sm focus:outline-none focus:border-[var(--color-accent)] font-mono tracking-wider transition placeholder-[#10b981]/40" placeholder="> LOCATION_SIG" />
+                                        <input type="number" required value={simAmount} onChange={e => setSimAmount(e.target.value)} className="w-full bg-[var(--color-bg-card)] text-[var(--color-success)] border border-[var(--color-border)] rounded p-3 text-sm focus:outline-none focus:border-[var(--color-accent)] font-mono tracking-wider transition placeholder-[var(--color-success)]/40" placeholder="> AMOUNT_INR" />
+                                        <input type="text" required value={simLocation} onChange={e => setSimLocation(e.target.value)} className="w-full bg-[var(--color-bg-card)] text-[var(--color-success)] border border-[var(--color-border)] rounded p-3 text-sm focus:outline-none focus:border-[var(--color-accent)] font-mono tracking-wider transition placeholder-[var(--color-success)]/40" placeholder="> LOCATION_SIG" />
                                     </div>
                                 </div>
                                 <div className="mt-auto pt-6">
@@ -321,10 +437,10 @@ export default function DashboardPage() {
                         </div>
                     </div>
 
-                    {/* Live Feed Table Redesigned */}
+                    {/* Live Feed Table */}
                     <div className="xl:col-span-2 bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-2xl max-h-[780px] overflow-hidden flex flex-col shadow-lg hover:border-[var(--color-border-subtle)] transition-all duration-300 relative">
                         <div className="px-5 py-4 border-b border-[var(--color-border)] flex flex-col md:flex-row justify-between items-start md:items-center gap-4 z-10 bg-[var(--color-bg-elevated)]/50 backdrop-blur-sm">
-                            <h2 className="text-sm font-bold tracking-widest text-[#e2e8f0] uppercase flex items-center gap-3">
+                            <h2 className="text-sm font-bold tracking-widest text-[var(--color-text-primary)] uppercase flex items-center gap-3">
                                 Live Pipeline Engine
                                 <div className="flex items-center gap-1.5 px-2 py-0.5 rounded border border-[var(--color-success)]/30 bg-[var(--color-success)]/10">
                                     <div className="relative flex h-2 w-2">
@@ -341,7 +457,7 @@ export default function DashboardPage() {
                                     <input
                                         type="text"
                                         placeholder="Search RRN / VPA..."
-                                        className="w-full bg-[var(--color-bg-primary)] border border-[var(--color-border)] rounded text-white text-xs px-3 py-1.5 focus:outline-none focus:border-[var(--color-accent)] transition-colors"
+                                        className="w-full bg-[var(--color-bg-primary)] border border-[var(--color-border)] rounded text-[var(--color-text-primary)] text-xs px-3 py-1.5 focus:outline-none focus:border-[var(--color-accent)] transition-colors placeholder:text-[var(--color-text-muted)]"
                                         value={searchQuery}
                                         onChange={e => setSearchQuery(e.target.value)}
                                     />
@@ -357,7 +473,7 @@ export default function DashboardPage() {
                                     <option value="SUCCESS">SUCCESS</option>
                                     <option value="PENDING">PENDING</option>
                                 </select>
-                                <button title="Clear filters" onClick={() => { setSearchQuery(''); setStatusFilter('All'); setMinAmt(''); setMaxAmt(''); }} className="text-[var(--color-text-muted)] hover:text-white transition">
+                                <button title="Clear filters" onClick={() => { setSearchQuery(''); setStatusFilter('All'); setMinAmt(''); setMaxAmt(''); }} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition">
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                                 </button>
                             </div>
@@ -366,8 +482,8 @@ export default function DashboardPage() {
                         <div className="bg-[var(--color-bg-card)] border-b border-[var(--color-border)] px-5 py-1 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">
                             <span>Showing {filteredTx.length} of {totalTx} Transactions</span>
                             <div className="flex gap-2">
-                                <input type="number" placeholder="Min ₹" className="bg-[var(--color-bg-primary)] border border-[var(--color-border)] rounded w-20 px-2 py-0.5 focus:outline-none" value={minAmt} onChange={e => setMinAmt(e.target.value)} />
-                                <input type="number" placeholder="Max ₹" className="bg-[var(--color-bg-primary)] border border-[var(--color-border)] rounded w-20 px-2 py-0.5 focus:outline-none" value={maxAmt} onChange={e => setMaxAmt(e.target.value)} />
+                                <input type="number" placeholder="Min ₹" className="bg-[var(--color-bg-primary)] border border-[var(--color-border)] rounded w-20 px-2 py-0.5 focus:outline-none text-[var(--color-text-primary)]" value={minAmt} onChange={e => setMinAmt(e.target.value)} />
+                                <input type="number" placeholder="Max ₹" className="bg-[var(--color-bg-primary)] border border-[var(--color-border)] rounded w-20 px-2 py-0.5 focus:outline-none text-[var(--color-text-primary)]" value={maxAmt} onChange={e => setMaxAmt(e.target.value)} />
                             </div>
                         </div>
 
@@ -379,13 +495,14 @@ export default function DashboardPage() {
                                         <th className="px-5 py-3 font-bold">Amt (INR)</th>
                                         <th className="px-5 py-3 font-bold hidden md:table-cell">Topology Flow</th>
                                         <th className="px-5 py-3 font-bold">GNN Matrix</th>
+                                        <th className="px-5 py-3 font-bold hidden lg:table-cell">Receiver Risk</th>
                                         <th className="px-5 py-3 font-bold text-right hidden sm:table-cell">Timestamp</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-[var(--color-border-subtle)]">
                                     {filteredTx.length === 0 && !loading && (
                                         <tr>
-                                            <td colSpan={5} className="px-6 py-20 text-center">
+                                            <td colSpan={6} className="px-6 py-20 text-center">
                                                 <div className="flex flex-col items-center justify-center text-[var(--color-text-muted)] space-y-3 mt-10">
                                                     <svg className="w-12 h-12 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
                                                     <p className="text-xs uppercase tracking-widest font-bold">No transactions map specific active filters.</p>
@@ -395,7 +512,7 @@ export default function DashboardPage() {
                                     )}
                                     {loading && transactions.length === 0 && (
                                         <tr>
-                                            <td colSpan={5} className="px-6 py-10">
+                                            <td colSpan={6} className="px-6 py-10">
                                                 <div className="space-y-4 shadow-inner">
                                                     {[...Array(8)].map((_, i) => (
                                                         <div key={i} className="h-10 bg-[var(--color-border)]/30 rounded animate-pulse w-full"></div>
@@ -408,6 +525,7 @@ export default function DashboardPage() {
                                         const styles = getStatusStyle(tx.status);
                                         const rawScore = Number(tx.riskScore) || 0;
                                         const barColor = rawScore >= 0.65 ? 'bg-[var(--color-danger)]' : rawScore > 0.3 ? 'bg-[var(--color-warning)]' : 'bg-[var(--color-success)]';
+                                        const receiverRisk = receiverRiskCache[tx.receiverVpa];
 
                                         return (
                                             <tr key={tx.id} onClick={() => setSelectedTx(tx)} className={`hover:bg-white/[0.04] transition-colors duration-200 group cursor-pointer animate-in slide-in-from-top-2 fade-in relative ${tx.status === 'FROZEN' ? 'border-l-2 border-l-[var(--color-danger)]' : 'border-l-2 border-l-transparent'}`}>
@@ -425,7 +543,7 @@ export default function DashboardPage() {
                                                         )}
                                                     </div>
                                                 </td>
-                                                <td className="px-5 py-4 font-mono font-medium text-white whitespace-nowrap">₹ {Number(tx.amount).toLocaleString('en-IN')}</td>
+                                                <td className="px-5 py-4 font-mono font-medium text-[var(--color-text-primary)] whitespace-nowrap">₹ {Number(tx.amount).toLocaleString('en-IN')}</td>
                                                 <td className="px-5 py-4 hidden md:table-cell max-w-[200px]">
                                                     <div className="flex items-center gap-2 text-xs font-mono font-medium">
                                                         <span className="text-[var(--color-text-secondary)] truncate font-semibold" title={tx.senderVpa}>{tx.senderVpa.split('@')[0]}</span>
@@ -435,12 +553,15 @@ export default function DashboardPage() {
                                                 </td>
                                                 <td className="px-5 py-4 min-w-[120px]">
                                                     <div className="flex flex-col gap-1.5">
-                                                        <span className={`font-mono text-xs font-bold ${rawScore >= 0.65 ? 'text-[var(--color-danger)]' : 'text-gray-300'}`}>{rawScore.toFixed(4)}</span>
+                                                        <span className={`font-mono text-xs font-bold ${rawScore >= 0.65 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-primary)]'}`}>{rawScore.toFixed(4)}</span>
                                                         <div className="w-16 h-[2px] bg-[var(--color-bg-primary)] rounded-full overflow-hidden">
                                                             <div className={`h-full ${barColor} shadow-[0_0_5px_currentColor] opacity-80`} style={{ width: `${Math.min(100, rawScore * 100)}%` }}></div>
                                                         </div>
-                                                        {tx.reason && <span className="text-[9px] font-mono text-[var(--color-text-muted)] truncate max-w-[150px] mt-0.5 pointer-events-none group-hover:text-white transition-colors">{tx.reason.split('.')[0]}</span>}
+                                                        {tx.reason && <span className="text-[9px] font-mono text-[var(--color-text-muted)] truncate max-w-[150px] mt-0.5 pointer-events-none group-hover:text-[var(--color-text-secondary)] transition-colors">{tx.reason.split('.')[0]}</span>}
                                                     </div>
+                                                </td>
+                                                <td className="px-5 py-4 hidden lg:table-cell">
+                                                    <ReceiverRiskBadge category={receiverRisk?.category} />
                                                 </td>
                                                 <td className="px-5 py-4 text-right text-[var(--color-text-secondary)] text-[11px] hidden sm:table-cell whitespace-nowrap font-mono">
                                                     {tx.createdAt || tx.timestamp

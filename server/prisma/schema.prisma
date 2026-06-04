@@ -149,3 +149,29 @@ model BatchJob {
   // Relations
   transactions Transaction[] @relation("BatchTransactions")
 }
+
+model ReceiverProfile {
+  id                   String   @id @default(uuid())
+  receiverVpa          String   @unique
+
+  // Transaction statistics
+  totalReceived        Int      @default(0)
+  totalFraudFlagged    Int      @default(0)
+  fraudRate            Float    @default(0)
+
+  // Velocity tracking
+  uniqueSendersLast24h Int      @default(0)
+  totalAmountLast24h   Float    @default(0)
+  avgAmountReceived    Float    @default(0)
+
+  // Account risk signals
+  isNewAccount         Boolean  @default(false)
+  firstSeenAt          DateTime @default(now())
+  lastSeenAt           DateTime @updatedAt
+  riskScore            Float    @default(0)
+  riskCategory         String   @default("UNKNOWN") // SAFE, SUSPICIOUS, HIGH_RISK, FRAUD_MULE
+
+  createdAt            DateTime @default(now())
+
+  @@map("receiver_profiles")
+}

@@ -7,7 +7,16 @@ import AnalyticsPage from './pages/AnalyticsPage';
 import RecoveryCasesPage from './pages/RecoveryCasesPage';
 import UserProfilePage from './pages/UserProfilePage';
 import BatchUploadPage from './pages/BatchUploadPage';
+import NetworkGraphPage from './pages/NetworkGraphPage';
+import ReceiverProfilePage from './pages/ReceiverProfilePage';
 import Sidebar from './components/Sidebar';
+
+// Initialize theme from localStorage on first load
+const initTheme = () => {
+  const saved = localStorage.getItem('fraudshield_theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+};
+initTheme();
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const token = localStorage.getItem('fraudshield_token');
@@ -36,6 +45,7 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
       <div className="md:hidden fixed bottom-0 w-full bg-[var(--color-bg-card)] border-t border-[var(--color-border)] z-50 flex justify-around p-1 pb-safe backdrop-blur-md bg-opacity-95 items-center">
         <MobileTab to="/dashboard" label="Dashboard" />
         <MobileTab to="/analytics" label="Analytics" />
+        <MobileTab to="/network" label="Network" />
         <MobileTab to="/recovery" label="Disputes" />
         <MobileTab to="/batch" label="Batch" />
       </div>
@@ -56,6 +66,8 @@ function App() {
         <Route path="/recovery" element={<ProtectedRoute><DashboardLayout><RecoveryCasesPage /></DashboardLayout></ProtectedRoute>} />
         <Route path="/batch" element={<ProtectedRoute><DashboardLayout><BatchUploadPage /></DashboardLayout></ProtectedRoute>} />
         <Route path="/profile" element={<ProtectedRoute><DashboardLayout><UserProfilePage /></DashboardLayout></ProtectedRoute>} />
+        <Route path="/network" element={<ProtectedRoute><DashboardLayout><NetworkGraphPage /></DashboardLayout></ProtectedRoute>} />
+        <Route path="/receivers" element={<ProtectedRoute><DashboardLayout><ReceiverProfilePage /></DashboardLayout></ProtectedRoute>} />
 
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

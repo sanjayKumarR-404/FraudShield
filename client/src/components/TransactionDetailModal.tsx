@@ -1,12 +1,34 @@
 import { useEffect, useState } from 'react';
-import client, { getRecoveryByTransaction, initiateRecovery } from '../api/client';
+import client, { getRecoveryByTransaction, initiateRecovery, getReceiverProfile } from '../api/client';
 import FeatureAttributionChart from './FeatureAttributionChart';
+
+interface ReceiverProfileData {
+    receiverVpa: string;
+    riskScore: number;
+    riskCategory: string;
+    fraudRate: number;
+    totalReceived: number;
+    uniqueSendersLast24h: number;
+    totalAmountLast24h: number;
+    avgAmountReceived: number;
+    firstSeenAt: string;
+    signals?: string[];
+}
+
+const RISK_CATEGORY_CONFIG: Record<string, { color: string; bg: string; label: string }> = {
+    SAFE: { color: '#10b981', bg: 'bg-[#10b981]/10', label: 'SAFE' },
+    SUSPICIOUS: { color: '#f59e0b', bg: 'bg-[#f59e0b]/10', label: 'SUSPICIOUS' },
+    HIGH_RISK: { color: '#f97316', bg: 'bg-[#f97316]/10', label: 'HIGH RISK' },
+    FRAUD_MULE: { color: '#ef4444', bg: 'bg-[#ef4444]/10', label: 'FRAUD MULE' },
+    UNKNOWN: { color: '#6b7280', bg: 'bg-gray-500/10', label: 'UNKNOWN' },
+};
 
 export default function TransactionDetailModal({ tx, onClose }: { tx: any, onClose: () => void }) {
     const [recoveryInfo, setRecoveryInfo] = useState<any>(null);
     const [behavior, setBehavior] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [initLoading, setInitLoading] = useState(false);
+    const [receiverProfile, setReceiverProfile] = useState<ReceiverProfileData | null>(null);
 
     useEffect(() => {
         if (!tx) return;
@@ -25,6 +47,15 @@ export default function TransactionDetailModal({ tx, onClose }: { tx: any, onClo
                 }
             } catch (e) {
                 console.error("Behavior check failed", e);
+            }
+
+            try {
+                if (tx.receiverVpa) {
+                    const rpData = await getReceiverProfile(tx.receiverVpa);
+                    setReceiverProfile(rpData);
+                }
+            } catch (e) {
+                console.error("Receiver profile fetch failed", e);
             } finally {
                 setLoading(false);
             }
@@ -171,6 +202,58 @@ export default function TransactionDetailModal({ tx, onClose }: { tx: any, onClo
                                     )
                                 ) : (
                                     <div className="text-[9px] text-[var(--color-text-muted)] mb-4 uppercase tracking-widest">Calibrating Vector...</div>
+                                )}
+                            </div>
+
+                            {/* Receiver Intelligence Section */}
+                            <div className="mt-4 pt-4 border-t border-[var(--color-border-subtle)]">
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-[#3b82f6] mb-3">Receiver Intelligence</p>
+                                {receiverProfile ? (
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-[9px] text-[var(--color-text-muted)] font-bold uppercase tracking-wider">Risk Category</span>
+                                            {(() => {
+                                                const cfg = RISK_CATEGORY_CONFIG[receiverProfile.riskCategory] || RISK_CATEGORY_CONFIG.UNKNOWN;
+                                                return (
+                                                    <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded border ${cfg.bg} ${receiverProfile.riskCategory === 'FRAUD_MULE' ? 'badge-mule' : ''}`}
+                                                        style={{ color: cfg.color, borderColor: `${cfg.color}40` }}>
+                                                        {cfg.label}
+                                                    </span>
+                                                );
+                                            })()}
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-[9px] text-[var(--color-text-muted)] font-bold uppercase tracking-wider">Fraud Rate</span>
+                                            <span className={`text-[9px] font-mono font-bold ${receiverProfile.fraudRate > 0.5 ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-secondary)]'}`}>
+                                                {(receiverProfile.fraudRate * 100).toFixed(1)}%
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-[9px] text-[var(--color-text-muted)] font-bold uppercase tracking-wider">Senders (24h)</span>
+                                            <span className={`text-[9px] font-mono font-bold ${receiverProfile.uniqueSendersLast24h >= 10 ? 'text-[var(--color-warning)]' : 'text-[var(--color-text-secondary)]'}`}>
+                                                {receiverProfile.uniqueSendersLast24h}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-[9px] text-[var(--color-text-muted)] font-bold uppercase tracking-wider">Total Received</span>
+                                            <span className="text-[9px] font-mono text-[var(--color-text-secondary)]">{receiverProfile.totalReceived} txns</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-[9px] text-[var(--color-text-muted)] font-bold uppercase tracking-wider">First Seen</span>
+                                            <span className="text-[9px] font-mono text-[var(--color-text-muted)]">
+                                                {new Date(receiverProfile.firstSeenAt).toLocaleDateString('en-IN')}
+                                            </span>
+                                        </div>
+                                        {receiverProfile.signals && receiverProfile.signals.length > 0 && (
+                                            <div className="mt-2 space-y-1">
+                                                {receiverProfile.signals.map((sig, i) => (
+                                                    <div key={i} className="text-[8px] font-bold leading-normal uppercase tracking-widest px-2 py-1.5 rounded border border-[#3b82f6]/30 bg-[#3b82f6]/10 text-[#3b82f6]">⚡ {sig}</div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="text-[9px] text-[var(--color-text-muted)] uppercase tracking-widest">Loading receiver data...</div>
                                 )}
                             </div>
 

@@ -5,6 +5,7 @@ import { config } from "../config/index.js";
 import type { TransactionBody, AIEngineResponse } from "../types/index.js";
 import { sendFraudAlerts } from "./alert.service.js";
 import { syncUserProfile } from "../jobs/profile.job.js";
+import { getReceiverRiskScore, updateReceiverProfile } from "./receiverProfile.service.js";
 
 /**
  * Generate a 12-digit Reference Retrieval Number (RRN) for UPI transactions.
@@ -18,10 +19,12 @@ function generateRRN(): string {
  *
  * Flow:
  * 1. Persist the transaction with PENDING status.
- * 2. Forward the payload to the Python AI engine for risk analysis.
- * 3. If the AI flags it as "High Risk", we freeze the transaction immediately.
- * 4. If the AI deems it "Safe", we mark it as SUCCESS.
- * 5. On AI engine failure, we default to FROZEN (fail-safe: freeze first).
+ * 2. Fetch receiver risk score for additional intelligence.
+ * 3. Forward the payload to the Python AI engine for risk analysis.
+ * 4. If the AI flags it as "High Risk", we freeze the transaction immediately.
+ * 5. If the AI deems it "Safe", we mark it as SUCCESS.
+ * 6. On AI engine failure, we default to FROZEN (fail-safe: freeze first).
+ * 7. Asynchronously update receiver profile (non-blocking).
  */
 export async function processTransaction(payload: TransactionBody) {
     const rrn = generateRRN();
@@ -49,8 +52,18 @@ export async function processTransaction(payload: TransactionBody) {
     // Attempt lookup for anomaly detection mapping
     const user = await prisma.user.findUnique({ where: { upiVpa: payload.senderVpa } });
 
+    // Step 2: Fetch receiver risk score before AI call
+    let receiverRiskScore = 0;
     try {
-        // Step 2: Call the Python AI engine for risk analysis
+        const receiverRisk = await getReceiverRiskScore(payload.receiverVpa);
+        receiverRiskScore = receiverRisk.score;
+        console.log(`[FraudShield] Receiver risk for ${payload.receiverVpa}: ${receiverRisk.score} (${receiverRisk.category})`);
+    } catch (err) {
+        console.warn("[FraudShield] Could not fetch receiver risk score:", err);
+    }
+
+    try {
+        // Step 3: Call the Python AI engine for risk analysis
         console.log("[DEBUG] Calling AI engine at:", `${config.aiEngineUrl}/analyze`);
         const aiResponse = await axios.post<AIEngineResponse>(
             `${config.aiEngineUrl}/analyze`,
@@ -60,7 +73,8 @@ export async function processTransaction(payload: TransactionBody) {
                 receiverVpa: payload.receiverVpa,
                 location: payload.location,
                 timestamp: now.toISOString(),
-                userId: user?.id || null
+                userId: user?.id || null,
+                receiverRiskScore,
             },
             { timeout: 15000 }
         );
@@ -73,7 +87,7 @@ export async function processTransaction(payload: TransactionBody) {
             attributionData = JSON.stringify(analysis.attribution);
         }
 
-        // Step 3/4: Apply the "Freeze First" logic
+        // Step 4/5: Apply the "Freeze First" logic
         if (analysis.status === "High Risk") {
             finalStatus = TransactionStatus.FROZEN;
             isFraud = true;
@@ -88,7 +102,7 @@ export async function processTransaction(payload: TransactionBody) {
         riskScore = -1;
     }
 
-    // Step 5: Update transaction with final verdict
+    // Step 6: Update transaction with final verdict
     const updatedTransaction = await prisma.transaction.update({
         where: { id: transaction.id },
         data: {
@@ -110,6 +124,13 @@ export async function processTransaction(payload: TransactionBody) {
     if (user) {
         syncUserProfile(user.id);
     }
+
+    // Step 7: Update receiver profile asynchronously — non-blocking
+    updateReceiverProfile(
+        payload.receiverVpa,
+        payload.amount,
+        finalStatus === TransactionStatus.FROZEN
+    ).catch(err => console.error('[FraudShield] Receiver profile update failed:', err));
 
     return updatedTransaction;
 }

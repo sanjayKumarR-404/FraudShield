@@ -155,4 +155,26 @@ export const downloadRecoveryPdf = async (caseId: string) => {
     document.body.removeChild(a);
 };
 
+// --- Receiver Profile APIs ---
+export const getReceiverProfile = async (vpa: string) => {
+    const res = await client.get(`/api/receivers/${encodeURIComponent(vpa)}/profile`);
+    return res.data?.data || null;
+};
+
+export const getTopRiskReceivers = async () => {
+    const res = await client.get('/api/receivers/top-risk');
+    return res.data?.data || [];
+};
+
+export const getFraudMules = async () => {
+    const res = await client.get('/api/receivers/fraud-mules');
+    return res.data?.data || [];
+};
+
+export const getAllReceiverProfiles = async () => {
+    const res = await client.get('/api/receivers/all');
+    return res.data?.data || [];
+};
+
 export default client;
+

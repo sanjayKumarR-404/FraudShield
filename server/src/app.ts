@@ -7,6 +7,7 @@ import recoveryRoutes from "./routes/recovery.routes.js";
 import alertRoutes from "./routes/alert.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import batchRoutes from "./routes/batch.routes.js";
+import receiverRoutes from "./routes/receiver.routes.js";
 
 const app = express();
 
@@ -26,6 +27,7 @@ app.use("/api/recovery", recoveryRoutes);
 app.use("/api/alerts", alertRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/batches", batchRoutes);
+app.use("/api/receivers", receiverRoutes);
 
 // --- Global Error Handler (must be last) ---
 app.use(errorHandler);

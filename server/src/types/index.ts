@@ -37,6 +37,8 @@ export interface AIEngineRequest {
     receiverVpa: string;
     location: string;
     timestamp: string;
+    userId?: string | null;
+    receiverRiskScore?: number;
 }
 
 export interface AttributionComponent {
@@ -52,6 +54,7 @@ export interface FeatureAttribution {
     amount: AttributionComponent;
     velocity: AttributionComponent;
     behavioral: AttributionComponent;
+    receiver?: AttributionComponent;
 }
 
 export interface AIEngineResponse {
@@ -60,6 +63,14 @@ export interface AIEngineResponse {
     reason: string;
     riskScore: number;
     attribution?: FeatureAttribution;
+}
+
+// --- Receiver Profile Types ---
+
+export interface ReceiverRiskResult {
+    score: number;
+    category: string;
+    signals: string[];
 }
 
 // --- API Response Types ---
