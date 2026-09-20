@@ -63,6 +63,89 @@ export interface AIEngineResponse {
     reason: string;
     riskScore: number;
     attribution?: FeatureAttribution;
+    mockContextUsed?: boolean;
+}
+
+// --- Phase 12: Mock Data Engine Types ---
+
+export interface MockSenderBehavior {
+    avgTransactionAmount: number;
+    txnFrequencyPerDay: number;
+    usualLocations: string[];
+    accountAgeInDays: number;
+    riskProfile: 'low' | 'medium' | 'high';
+}
+
+export interface MockReceiverBehavior {
+    totalReceived: number;
+    uniqueSendersLast7Days: number;
+    averageAmountReceived: number;
+    /** 0–1; higher = more likely fraud mule */
+    muleScore: number;
+}
+
+export interface MockTransaction {
+    rrn: string;
+    senderVpa: string;
+    receiverVpa: string;
+    amount: number;
+    location: string;
+    timestamp: Date;
+    senderBehavior: MockSenderBehavior;
+    receiverBehavior: MockReceiverBehavior;
+    anomalyFlags: string[];
+    mockRiskScore: number;
+    mockReason: string;
+}
+
+export interface VPAValidationResult {
+    isValid: boolean;
+    vpa: string;
+    bankDomain: string;
+    bankRiskScore: number;
+    accountAgeDays: number;
+    accountAgeRiskFactor: number;
+    isBlacklisted: boolean;
+    recommendedAction: 'allow' | 'review' | 'block';
+}
+
+export interface CityData {
+    name: string;
+    state: string;
+    latitude: number;
+    longitude: number;
+    riskLevel: 'low' | 'medium' | 'high';
+    fraudRatePercentage: number;
+    majorBanks: string[];
+}
+
+export interface EnrichedTransactionContext {
+    senderBehavior: MockSenderBehavior;
+    receiverBehavior: MockReceiverBehavior;
+    anomalyFlags: string[];
+    senderValidation: VPAValidationResult;
+    receiverValidation: VPAValidationResult;
+    mockRiskScore: number;
+}
+
+/** Hourly fraud-rate trend data for analytics charts */
+export interface TransactionTrend {
+    hour: number;       // 0–23
+    total: number;
+    fraud: number;
+    fraudRate: number;  // 0–1
+}
+
+/** Per-VPA historical summary for analytics */
+export interface VpaHistoricalStats {
+    vpa: string;
+    totalTransactions: number;
+    totalFrozen: number;
+    totalAmount: number;
+    avgAmount: number;
+    fraudRate: number;
+    mostCommonLocation: string | null;
+    lastTransactionAt: Date | null;
 }
 
 // --- Receiver Profile Types ---

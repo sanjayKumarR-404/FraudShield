@@ -1,10 +1,15 @@
 import { Response } from "express";
-import { processTransaction, getAllTransactions, getTransactionById } from "../services/transaction.service.js";
-import type { AuthenticatedRequest, TransactionBody, ApiResponse } from "../types/index.js";
+import { processTransaction, getAllTransactions, getTransactionById, getTransactionTrends, getVpaHistoricalStats } from "../services/transaction.service.js";
+import { buildEnrichedContext } from "../services/mock-data.service.js";
+import { getOrCreateUser } from "../services/user.service.js";
+import type { AuthenticatedRequest, TransactionBody, ApiResponse, EnrichedTransactionContext } from "../types/index.js";
 
 /**
  * POST /api/transactions/process
- * Receives a transaction, runs it through the AI engine, and returns the verdict.
+ * Receives a transaction, enriches it with realistic behavioral context from the
+ * Mock Data Engine (Phase 12), then runs it through the AI pipeline.
+ *
+ * Enrichment is non-blocking — if it fails, the raw transaction is still processed.
  */
 export async function process(req: AuthenticatedRequest, res: Response): Promise<void> {
     const { senderVpa, receiverVpa, amount, location } = req.body as TransactionBody;
@@ -27,16 +32,42 @@ export async function process(req: AuthenticatedRequest, res: Response): Promise
         return;
     }
 
-    const transaction = await processTransaction({ senderVpa, receiverVpa, amount, location });
+    // Phase 12: Enrich the transaction with mock behavioral context
+    let enrichedContext: EnrichedTransactionContext | null = null;
+    try {
+        enrichedContext = buildEnrichedContext(senderVpa, receiverVpa, amount, location, new Date());
+        console.log(
+            `[FraudShield:MockData] Sender=${senderVpa} | ` +
+            `RiskProfile=${enrichedContext.senderBehavior.riskProfile} | ` +
+            `Flags=[${enrichedContext.anomalyFlags.join(', ') || 'none'}] | ` +
+            `MockScore=${enrichedContext.mockRiskScore}`
+        );
+    } catch (err) {
+        // Enrichment failure is non-fatal — AI pipeline proceeds with raw data
+        console.warn('[FraudShield:MockData] Context enrichment failed (non-fatal):', err);
+    }
 
-    const statusCode = transaction.status === "FROZEN" ? 200 : 200;
+    // Auto-create sender user if doesn't exist
+    await getOrCreateUser(senderVpa);
 
-    res.status(statusCode).json({
+    const transaction = await processTransaction({ senderVpa, receiverVpa, amount, location }, enrichedContext ?? undefined);
+
+    res.status(200).json({
         success: true,
         message: transaction.status === "FROZEN"
             ? "⚠️ Transaction frozen — flagged as high risk by our AI engine"
             : "✅ Transaction processed successfully",
-        data: transaction,
+        data: {
+            ...transaction,
+            // Surface mock enrichment data for the dashboard modal
+            anomalyFlags: enrichedContext?.anomalyFlags ?? [],
+            mockRiskScore: enrichedContext?.mockRiskScore ?? null,
+            senderProfile: enrichedContext?.senderBehavior ?? null,
+            receiverMuleScore: enrichedContext?.receiverBehavior.muleScore ?? null,
+            senderVpaRisk: enrichedContext?.senderValidation.bankRiskScore ?? null,
+            receiverVpaRisk: enrichedContext?.receiverValidation.bankRiskScore ?? null,
+            receiverRecommendedAction: enrichedContext?.receiverValidation.recommendedAction ?? null,
+        },
     } satisfies ApiResponse);
 }
 
@@ -96,5 +127,38 @@ export async function getAttribution(req: AuthenticatedRequest, res: Response): 
         success: true,
         message: "Attribution vector retrieved",
         data: JSON.parse(transaction.attributionData),
+    } satisfies ApiResponse);
+}
+
+/**
+ * GET /api/transactions/trends
+ * Returns hourly fraud-rate trend data for the analytics page.
+ * Phase 12: Shows how fraud rate climbs at night, driven by mock data patterns.
+ */
+export async function getTrends(_req: AuthenticatedRequest, res: Response): Promise<void> {
+    const trends = await getTransactionTrends();
+    res.status(200).json({
+        success: true,
+        message: `Trend data across ${trends.reduce((s, t) => s + t.total, 0)} transactions`,
+        data: trends,
+    } satisfies ApiResponse);
+}
+
+/**
+ * GET /api/transactions/vpa-stats/:vpa
+ * Returns historical statistics for a specific VPA address.
+ * Phase 12: Exposes per-VPA fraud rate, amount averages, and location data.
+ */
+export async function getVpaStats(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const { vpa } = req.params;
+    if (!vpa) {
+        res.status(400).json({ success: false, message: 'VPA is required' } satisfies ApiResponse);
+        return;
+    }
+    const stats = await getVpaHistoricalStats(decodeURIComponent(vpa as string));
+    res.status(200).json({
+        success: true,
+        message: `Historical stats for ${vpa}`,
+        data: stats,
     } satisfies ApiResponse);
 }

@@ -41,6 +41,7 @@ class TransactionPayload(BaseModel):
     timestamp: str
     userId: Optional[str] = None
     receiverRiskScore: Optional[float] = 0.0  # NEW: receiver-side risk intelligence
+    mockContext: Optional[dict] = None        # NEW: Phase 12 mock data context
 
 @app.get("/")
 def home():
@@ -52,6 +53,80 @@ def analyze_transaction_get(amount: float):
     if amount > 100000:
         return {"status": "High Risk", "action": "Freeze", "reason": f"High amount: ₹{amount:,.2f}", "riskScore": 75.0}
     return {"status": "Safe", "action": "Allow", "reason": "Amount within normal range", "riskScore": 10.0}
+
+from typing import List
+
+def blend_scores(
+    gnn_score: float,
+    mock_risk_score: float,
+    anomaly_flags: List[str],
+    sender_behavior: dict,
+    receiver_validation: dict
+) -> float:
+    """
+    Blend GNN score with mock enrichment.
+    Conservative approach: trust GNN more for normal transactions.
+    """
+
+    # SAFEGUARD: If GNN says it's normal AND mock says it's normal, keep it normal
+    if gnn_score < 0.4 and mock_risk_score < 0.4 and len(anomaly_flags) == 0:
+        return 0.15  # Very low risk
+
+    # If NO anomaly flags and GNN says it's safe, trust that
+    if len(anomaly_flags) == 0 and gnn_score < 0.5:
+        return gnn_score * 0.9
+
+    # If 1-2 flags but GNN is low, be conservative
+    if len(anomaly_flags) <= 2 and gnn_score < 0.6:
+        # Weight: 70% GNN, 30% mock
+        final_score = (gnn_score * 0.7) + (mock_risk_score * 0.3)
+    else:
+        # If 3+ flags or high GNN, blend equally
+        final_score = (gnn_score * 0.6) + (mock_risk_score * 0.4)
+
+    # CRITICAL ANOMALY FLAGS: +0.20 per critical flag
+    critical_flags = ["blacklisted_vpa", "impossible_travel"]
+    critical_penalty = 0.0
+    for flag in critical_flags:
+        if flag in anomaly_flags:
+            critical_penalty += 0.20
+
+    # MEDIUM ANOMALY FLAGS: +0.05 per medium flag
+    medium_flags = ["mule_receiver", "mule_account", "unusual_amount"]
+    medium_penalty = 0.0
+    for flag in medium_flags:
+        if flag in anomaly_flags:
+            medium_penalty += 0.05
+
+    final_score = min(final_score + critical_penalty + medium_penalty, 1.0)
+    return final_score
+
+def generate_reason(anomaly_flags: List[str], gnn_score: float, mock_risk_score: float) -> str:
+    """Generate reason, only if there's actual risk."""
+
+    if not anomaly_flags and gnn_score < 0.5:
+        return "Transaction cleared: Normal patterns detected."
+
+    reasons: List[str] = []
+
+    for flag in anomaly_flags:
+        if flag == "blacklisted_vpa":
+            reasons.append("VPA is flagged in fraud watchlist")
+        elif flag == "impossible_travel":
+            reasons.append("Impossible travel between locations detected")
+        elif flag in ("mule_receiver", "mule_account"):
+            reasons.append("Receiver shows suspicious money collection pattern")
+        elif flag == "unusual_amount":
+            reasons.append("Amount significantly exceeds sender's typical patterns")
+        elif flag == "night_transaction":
+            reasons.append("High-risk time window (11 PM - 7 AM)")
+        elif flag == "new_receiver":
+            reasons.append("First transaction to this receiver")
+
+    if gnn_score >= 0.7:
+        reasons.append(f"AI model high-confidence flag (score: {gnn_score:.2f})")
+
+    return "; ".join(reasons) if reasons else "Transaction cleared."
 
 @app.post("/analyze")
 def analyze_transaction_post(txn: TransactionPayload):
@@ -153,10 +228,30 @@ def analyze_transaction_post(txn: TransactionPayload):
     if txn.amount >= 50000 and location_risk_score >= 0.5:
         final_score = max(final_score, 0.70)
 
+    # Apply mock data enrichment if available
+    mock_context_used = False
+    if txn.mockContext:
+        anomaly_flags = txn.mockContext.get("anomalyFlags", [])
+        mock_risk_score = txn.mockContext.get("mockRiskScore", 0)
+        sender_behavior = txn.mockContext.get("senderBehavior", {})
+        receiver_validation = txn.mockContext.get("receiverValidation", {})
+        
+        final_score = blend_scores(
+            gnn_score=final_score,
+            mock_risk_score=mock_risk_score,
+            anomaly_flags=anomaly_flags,
+            sender_behavior=sender_behavior,
+            receiver_validation=receiver_validation
+        )
+        mock_context_used = True
+
     print(f"DEBUG [Scoring Phase]: amount_risk={amount_risk}, final_score={final_score}")
 
     # 10. Explainability
-    reason = generate_explanation(features_vector, final_score)
+    if mock_context_used:
+        reason = generate_reason(anomaly_flags, gnn_score, mock_risk_score)
+    else:
+        reason = generate_explanation(features_vector, final_score)
 
     # 11. Attribution breakdown — updated weights
     gnn_contribution = 0.30 * gnn_score
@@ -205,14 +300,24 @@ def analyze_transaction_post(txn: TransactionPayload):
         }
     }
 
-    # 12. Response — contract unchanged for Node.js compatibility
-    if final_score >= GNN_THRESHOLD:
+    # 12. Response — calibrated thresholds
+    if final_score >= 0.70:
         response_dict = {
             "status": "High Risk",
             "action": "FREEZE",
             "reason": reason,
             "riskScore": final_score,
-            "attribution": attribution
+            "attribution": attribution,
+            "mockContextUsed": mock_context_used
+        }
+    elif final_score >= 0.50:
+        response_dict = {
+            "status": "Suspicious",
+            "action": "PENDING",
+            "reason": reason,
+            "riskScore": final_score,
+            "attribution": attribution,
+            "mockContextUsed": mock_context_used
         }
     else:
         response_dict = {
@@ -220,7 +325,8 @@ def analyze_transaction_post(txn: TransactionPayload):
             "action": "ALLOW",
             "reason": reason,
             "riskScore": final_score,
-            "attribution": attribution
+            "attribution": attribution,
+            "mockContextUsed": mock_context_used
         }
         
     print(f"DEBUG [Response generated]: {response_dict}")
